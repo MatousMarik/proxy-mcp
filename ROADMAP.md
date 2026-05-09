@@ -1,7 +1,7 @@
 # proxy-mcp Roadmap
 
-Last updated: 2026-02-11  
-Current shipped baseline: commit `ec28255`
+Last updated: 2026-04-19  
+Current shipped baseline: v2.2.0 (commit `e93804f`)
 
 ## Current Baseline (Already Shipped)
 
@@ -21,6 +21,8 @@ These are implemented and in the repo now:
   - `proxy_search_session_bodies`
   - `proxy_get_session_exchange`
   - `proxy_export_har`
+  - `proxy_import_har`
+  - `proxy_replay_session`
   - `proxy_delete_session`
   - `proxy_session_recover`
 - Session resources/templates:
@@ -42,33 +44,19 @@ These are implemented and in the repo now:
 
 ## Phase 1 (High ROI / Next)
 
-### 1) Replay Engine (`proxy_replay_session`)
-Problem solved:
-- Turn observed traffic into reusable, high-throughput extraction.
+### 1) ~~Replay Engine (`proxy_replay_session`)~~ — SHIPPED in 2.x
 
-Planned interface additions:
-- Tool: `proxy_replay_session`
-- Tool: `proxy_replay_status`
-- Resource: `proxy://replay/{replay_id}/summary`
+Implemented at `src/tools/sessions.ts` (`proxy_replay_session`). Ships with:
+- Filter-based selection (`hostname_contains`, `url_contains`, `status_code`, `exchange_ids`)
+- `mode: "dry_run"` (plan-only, no outbound) and `mode: "execute"`
+- `target_base_url` override (redirect replay to staging/local)
+- `limit` / `offset` / `timeout_ms` controls
+- Per-request result capture on execute
 
-Functional requirements:
-- Replay selected session traffic by filter and/or explicit sequence list
-- Variable substitution (`{timestamp}`, `{nonce}`, captured token refs)
-- Concurrency control, rate limiting, retry policy
-- Per-request result capture (status, latency, error class)
-
-Edge cases/failure modes:
-- Token/session expiry during replay
-- Target-side throttling/429 storms
-- Non-idempotent endpoints replayed by mistake
-
-Acceptance criteria:
-- Can replay at least 1,000 selected requests with bounded concurrency
-- Replay report includes success/failure counts and error buckets
-- Supports dry-run mode (plan only, no outbound send)
-
-Effort: M  
-Dependencies: session query engine (already shipped)
+Deferred (not blocking POC workflows):
+- `proxy_replay_status` streaming status (currently returns all results synchronously)
+- `proxy://replay/{replay_id}/summary` resource (dedicated replay run tracking)
+- Variable substitution (`{timestamp}`, `{nonce}`, captured token refs) — currently replays recorded bodies verbatim
 
 ### 2) Session Diffing (`proxy_diff_sessions`)
 Problem solved:
@@ -231,7 +219,7 @@ Dependencies: replay engine + diff logic
 
 | Priority | Feature | Phase | Effort | Dependencies | Status |
 |---|---|---|---|---|---|
-| P1 | Replay engine | 1 | M | Session query (shipped) | Planned |
+| P1 | Replay engine | 1 | M | Session query (shipped) | **Shipped (v2.x, minus replay-status + variable substitution)** |
 | P2 | Session diffing | 1 | M | Replay/query schema | Planned |
 | P3 | Decoder pipeline | 1 | M | Persisted exchange access (shipped) | Planned |
 | P4 | WebSocket/SSE capture | 2 | L | Capture layer extensions | Planned |

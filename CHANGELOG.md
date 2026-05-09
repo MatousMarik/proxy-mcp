@@ -1,5 +1,25 @@
 # Changelog
 
+## 3.0.0
+
+### New Features
+
+- **Camoufox interceptor — anti-detect Firefox via Playwright WS.** New `CamoufoxInterceptor` (id `camoufox`) spawns `camoufox.server.launch_server()` as a Python subprocess, parses the emitted Websocket endpoint, and exposes it. Caller drives pages with `await firefox.connect(wsUrl)` instead of going through MCP page tools. Proxy + NSS CA trust are pre-wired at launch time so `geoip: true` resolves locale/timezone from the proxy exit IP.
+- **4 new tools:** `interceptor_camoufox_launch`, `interceptor_camoufox_info`, `interceptor_camoufox_list`, `interceptor_camoufox_close`. Launch params expose camoufox's full fingerprint surface: `os`, `webgl_config`, `fonts`, `humanize`, `headless`, `addons`, `main_world_eval`, `enable_cache`, `disable_coop`, `block_webrtc`, `block_webgl`, `block_images`, `locale`, `geoip`, `port`, `ws_path`, `python_executable`, `trust_proxy_cert`, plus a raw `config` escape hatch.
+- **New resource `proxy://camoufox/targets`.** Mirror of `proxy://browser/targets` for camoufox instances.
+
+### Notes
+
+- Host requirements (only when using camoufox): Python 3 + `pip install "camoufox[geoip]"` + `python3 -m camoufox fetch` + NSS `certutil` (`libnss3-tools`/`nss-tools`/`brew install nss`). If `certutil` is missing the launcher still runs but the proxy CA is not trusted — HTTPS pages show cert errors and proxy traffic is still captured.
+- No new npm dependencies. `playwright-core` (already a runtime dep for cloakbrowser) provides the `firefox.connect(wsUrl)` client.
+- All proxy-side capabilities — traffic capture, TLS fingerprint capture, rules, header injection, mocks, sessions, replay, upstream chaining, JA3 spoofing — apply to camoufox automatically because the proxy sits in front of it.
+
+## 2.3.0
+
+### New Features
+
+- **Transparent proxy + one-command mobile capture setup.** New `transparent` and `mobile` tool groups for Wi-Fi-AP-based mobile capture (DHCP/DNS/iptables redirect to the MITM proxy). Documented in the README "Mobile Capture (Transparent Proxy)" section.
+
 ## 2.2.0
 
 ### Breaking Changes
