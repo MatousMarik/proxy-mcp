@@ -2,7 +2,7 @@
 
 proxy-mcp is an MCP server that runs an explicit HTTP/HTTPS MITM proxy (L7). It captures requests/responses, lets you modify traffic in-flight (headers/bodies/mock/forward/drop), supports upstream proxy chaining, and records TLS fingerprints for connections to the proxy (JA3/JA4) plus optional upstream server JA3S. Ships "interceptors" to route a stealth browser (cloakbrowser, source-patched Chromium), CLI tools, Docker containers, and Android devices/apps through the proxy, plus Playwright-driven browser automation with locator-based click, typing, scroll, and ARIA snapshots.
 
-71 tools + 6 resources + 3 resource templates. Built on [mockttp](https://github.com/httptoolkit/mockttp) and [cloakbrowser](https://cloakbrowser.dev/).
+75 tools + 7 resources + 3 resource templates. Built on [mockttp](https://github.com/httptoolkit/mockttp), [cloakbrowser](https://cloakbrowser.dev/), and [camoufox](https://github.com/daijro/camoufox).
 
 ## Table of Contents
 
@@ -19,7 +19,7 @@ proxy-mcp is an MCP server that runs an explicit HTTP/HTTPS MITM proxy (L7). It 
   - [Traffic Capture](#traffic-capture-4)
   - [Modification Shortcuts](#modification-shortcuts-3)
   - [TLS Fingerprinting](#tls-fingerprinting-9)
-  - [Interceptors](#interceptors-17)
+  - [Interceptors](#interceptors-21)
   - [Browser DevTools-equivalents](#browser-devtools-equivalents-9)
   - [Sessions](#sessions-13)
   - [Humanizer](#humanizer--playwright-input-5)
@@ -564,7 +564,7 @@ proxy_test_rule_match --mode exchange --exchange_id "ex_abc123"
 
 Fingerprint spoofing works by re-issuing the request from the proxy via impit (native Rust TLS/HTTP2 impersonation via rustls). TLS 1.3 and HTTP/2 fingerprints (SETTINGS, WINDOW_UPDATE, PRIORITY frames) match real browsers by construction. The origin server sees the proxy's spoofed TLS, HTTP/2, and header order — not the original client's. When a `user_agent` is set (including via presets), proxy-mcp also normalizes Chromium UA Client Hints headers (`sec-ch-ua*`) to match the spoofed User-Agent (forwarding contradictory hints is a common bot signal). **Browser exception:** when cloakbrowser is launched via `interceptor_browser_launch`, document loads and same-origin requests use the browser's native TLS (no impit), preserving fingerprint consistency for bot detection challenges. Only cross-origin sub-resource requests are re-issued with spoofed TLS. Non-browser clients (curl, spawn, HAR replay) get full TLS + UA spoofing on all requests. Use `proxy_set_fingerprint_spoof` with a browser preset for one-command setup. `proxy_set_ja3_spoof` is kept for backward compatibility but custom JA3 strings are ignored (the preset's impit browser target is used instead). JA4 fingerprints are captured (read-only) but spoofing is not supported.
 
-### Interceptors (17)
+### Interceptors (21)
 
 Interceptors configure targets (browsers, processes, devices, containers) to route their traffic through the proxy automatically.
 
@@ -585,6 +585,46 @@ Interceptors configure targets (browsers, processes, devices, containers) to rou
 | `interceptor_browser_close` | Close a browser instance by target ID |
 
 Stealth is source-level: cloakbrowser ships 48+ C++ patches so ja3n/ja4/akamai match real Chrome, `navigator.webdriver` is false, audio/canvas/WebGL fingerprints match real hardware. No JS stealth injection needed. First launch downloads a ~200 MB Chromium binary (cached afterwards).
+
+#### Camoufox (4) — anti-detect Firefox
+
+| Tool | Description |
+|------|-------------|
+| `interceptor_camoufox_launch` | Spawn camoufox as a Playwright WebSocket server, proxy + NSS CA pre-wired. Returns `wsUrl` |
+| `interceptor_camoufox_info` | Get the wsUrl + ready-to-paste TS / Python `firefox.connect()` snippets |
+| `interceptor_camoufox_list` | List active camoufox instances and their fingerprint details |
+| `interceptor_camoufox_close` | Stop the launcher, remove the temp launcher dir + NSS profile |
+
+Camoufox is a patched Firefox with source-level fingerprint controls (OS, WebGL vendor/renderer, fonts, locale, geoip-derived timezone, WebRTC blocking, humanize cursor). Unlike the Chromium path, camoufox runs as an external Python process and exposes a Playwright WS endpoint — the caller drives pages with `await firefox.connect(wsUrl)` instead of going through MCP page tools.
+
+**Host requirements:**
+
+```bash
+pip install "camoufox[geoip]"
+python3 -m camoufox fetch          # downloads patched Firefox binary (~200 MB)
+
+# For TLS MITM trust (NSS profile is created per-launch and the proxy CA is imported):
+sudo apt install libnss3-tools     # Debian/Ubuntu
+sudo dnf install nss-tools         # Fedora/RHEL
+# macOS: brew install nss   (or use /Applications/Firefox.app/Contents/MacOS/certutil)
+```
+
+If `certutil` is missing, the launch still succeeds but the proxy CA is not trusted — HTTPS pages will show certificate errors. Proxy traffic is still captured.
+
+**Usage:**
+
+```text
+proxy_start                                     // start the MITM proxy
+interceptor_camoufox_launch { headless: true }  // returns { targetId, wsUrl, playwright_connect, ... }
+// in your own Node code:
+//   import { firefox } from 'playwright-core';
+//   const browser = await firefox.connect(wsUrl);
+//   const page = await (await browser.newContext()).newPage();
+//   await page.goto('https://example.com');
+interceptor_camoufox_close { target_id }        // when done
+```
+
+`playwright-core` is already a proxy-mcp dependency — Camoufox uses its `firefox` namespace via WebSocket; no extra Node packages needed. Traffic capture, TLS fingerprinting, rules, mocks, sessions, upstream chaining, and JA3/JA4 spoofing all apply to camoufox automatically because the proxy sits in front of it.
 
 #### Terminal / Process (2)
 
@@ -698,6 +738,7 @@ All tools require `target_id` from a prior `interceptor_browser_launch`. The eng
 | `proxy://sessions` | Persistent session catalog + runtime persistence status |
 | `proxy://browser/primary` | Current page URL/title for the most recently launched browser instance |
 | `proxy://browser/targets` | Current page state for all active browser instances |
+| `proxy://camoufox/targets` | Active camoufox instances with their wsUrl and fingerprint details |
 | `proxy://sessions/{session_id}/summary` | Aggregate stats for one recorded session (resource template) |
 | `proxy://sessions/{session_id}/timeline` | Time-bucketed request/error timeline (resource template) |
 | `proxy://sessions/{session_id}/findings` | Top errors/slow exchanges/host error rates (resource template) |

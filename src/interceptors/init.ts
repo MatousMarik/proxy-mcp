@@ -9,6 +9,7 @@ import { BrowserInterceptor } from "./browser.js";
 import { AndroidAdbInterceptor } from "./android-adb.js";
 import { AndroidFridaInterceptor } from "./android-frida.js";
 import { DockerInterceptor } from "./docker.js";
+import { CamoufoxInterceptor } from "./camoufox.js";
 
 export function initInterceptors(): void {
   interceptorManager.register(new TerminalInterceptor());
@@ -16,4 +17,5 @@ export function initInterceptors(): void {
   interceptorManager.register(new AndroidAdbInterceptor());
   interceptorManager.register(new AndroidFridaInterceptor());
   interceptorManager.register(new DockerInterceptor());
+  interceptorManager.register(new CamoufoxInterceptor());
 }
