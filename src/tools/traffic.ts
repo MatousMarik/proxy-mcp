@@ -67,6 +67,10 @@ export function registerTrafficTools(server: McpServer): void {
           text: truncateResult({
             status: "success",
             total,
+            // `count` is the historical alias kept for callers (and the
+            // integration test) that read the post-filter total under that
+            // name. Same value as `total`; do not diverge.
+            count: total,
             offset,
             limit,
             showing: summaries.length,

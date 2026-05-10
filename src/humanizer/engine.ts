@@ -81,7 +81,7 @@ class HumanizerEngine {
     x: number,
     y: number,
   ): Promise<{ totalMs: number; eventsDispatched: number }> {
-    const page = getPageForTarget(targetId);
+    const page = await getPageForTarget(targetId);
     const start = Date.now();
     await page.mouse.move(x, y);
     const state = getMouseState(targetId);
@@ -98,7 +98,7 @@ class HumanizerEngine {
       timeoutMs?: number;
     } = {},
   ): Promise<{ totalMs: number; eventsDispatched: number; clickedAt: Point; resolvedBy: string }> {
-    const page = getPageForTarget(targetId);
+    const page = await getPageForTarget(targetId);
     const button = opts.button ?? "left";
     const clickCount = opts.clickCount ?? 1;
     const timeout = opts.timeoutMs ?? 15_000;
@@ -139,7 +139,7 @@ class HumanizerEngine {
     text: string,
     opts: { delayMs?: number } = {},
   ): Promise<{ totalMs: number; eventsDispatched: number; charsTyped: number }> {
-    const page = getPageForTarget(targetId);
+    const page = await getPageForTarget(targetId);
     const start = Date.now();
     await page.keyboard.type(text, opts.delayMs !== undefined ? { delay: opts.delayMs } : undefined);
     return {
@@ -154,7 +154,7 @@ class HumanizerEngine {
     deltaY: number,
     deltaX?: number,
   ): Promise<{ totalMs: number; eventsDispatched: number }> {
-    const page = getPageForTarget(targetId);
+    const page = await getPageForTarget(targetId);
     const start = Date.now();
     await page.mouse.wheel(deltaX ?? 0, deltaY);
     return { totalMs: Date.now() - start, eventsDispatched: 1 };
@@ -165,7 +165,7 @@ class HumanizerEngine {
     durationMs: number,
     intensity: "subtle" | "normal" = "subtle",
   ): Promise<{ totalMs: number; eventsDispatched: number }> {
-    const page = getPageForTarget(targetId);
+    const page = await getPageForTarget(targetId);
     const state = getMouseState(targetId);
     const start = Date.now();
     let eventsDispatched = 0;

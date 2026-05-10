@@ -4,13 +4,16 @@
  * The full activate() path spawns a Python subprocess, so it's covered by
  * the integration suite (skipped when camoufox isn't installed). Here we
  * exercise the pieces that work in pure Node: launcher script generation
- * and the Websocket-endpoint stream parser.
+ * and the file-based Websocket-endpoint handshake.
  */
 
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import { Readable } from "node:stream";
+import { mkdtemp, writeFile, rename, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { ChildProcess } from "node:child_process";
 
 import { buildLauncherScript, awaitWsEndpoint, CamoufoxInterceptor } from "../../src/interceptors/camoufox.js";
@@ -30,24 +33,54 @@ function fakeProc(): { proc: ChildProcess; stdout: Readable; stderr: Readable; e
   };
 }
 
+async function tmpHandshakeFile(): Promise<{ dir: string; file: string; cleanup: () => Promise<void> }> {
+  const dir = await mkdtemp(join(tmpdir(), "proxy-mcp-test-"));
+  const file = join(dir, "ws-endpoint.json");
+  return { dir, file, cleanup: () => rm(dir, { recursive: true, force: true }) };
+}
+
+async function atomicWriteHandshake(file: string, wsUrl: string): Promise<void> {
+  const dir = file.substring(0, file.lastIndexOf("/"));
+  const tmp = join(dir, `.ws-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+  await writeFile(tmp, JSON.stringify({ wsUrl, ts: Math.floor(Date.now() / 1000) }), "utf-8");
+  await rename(tmp, file);
+}
+
 describe("buildLauncherScript", () => {
-  it("embeds JSON params and references launch_server", () => {
-    const script = buildLauncherScript({ headless: true, proxy: { server: "http://127.0.0.1:9000" } });
-    assert.match(script, /from camoufox\.server import launch_server/);
+  it("emits a script that imports the camoufox primitives we wrap", () => {
+    const script = buildLauncherScript(
+      { headless: true, proxy: { server: "http://127.0.0.1:9000" } },
+      "/tmp/proxy-mcp-camoufox-XXX/ws-endpoint.json",
+    );
+    assert.match(script, /from camoufox\.server import LAUNCH_SCRIPT, get_nodejs, to_camel_case_dict/);
+    assert.match(script, /from camoufox\.utils import launch_options/);
     assert.match(script, /params = json\.loads\('/);
-    assert.match(script, /launch_server\(\*\*params\)/);
     assert.match(script, /signal\.signal\(signal\.SIGTERM/);
   });
 
+  it("embeds the websocket-endpoint file path", () => {
+    const script = buildLauncherScript({}, "/tmp/proxy-mcp-camoufox-ABC/ws-endpoint.json");
+    assert.match(script, /_WS_FILE = '\/tmp\/proxy-mcp-camoufox-ABC\/ws-endpoint\.json'/);
+  });
+
+  it("strips ANSI escapes from the WS-line scan inside the python wrapper", () => {
+    const script = buildLauncherScript({}, "/tmp/x");
+    // The wrapper pre-processes captured lines through this stdlib regex
+    // before parsing the wsUrl, so colour codes never leak into the
+    // handshake file.
+    assert.match(script, /_ANSI = re\.compile/);
+    assert.match(script, /_ANSI\.sub\(''\s*,\s*line\)/);
+  });
+
   it("escapes single quotes in nested params", () => {
-    const script = buildLauncherScript({ note: "it's fine" });
+    const script = buildLauncherScript({ note: "it's fine" }, "/tmp/x");
     // JSON.stringify produces "it's fine" -> in our escape pass, `'` -> `\'`
     assert.match(script, /it\\'s fine/);
   });
 
   it("preserves JSON shape (round-trips through Python literal escape)", () => {
     const params = { os: ["windows", "macos"], block_webrtc: true, proxy: { server: "http://x" } };
-    const script = buildLauncherScript(params);
+    const script = buildLauncherScript(params, "/tmp/x");
     const m = /params = json\.loads\('([\s\S]*?)'\)/.exec(script);
     assert.ok(m, "expected to find JSON literal in script");
     // Reverse the Python escape (\\ and \') to recover the original JSON.
@@ -56,48 +89,78 @@ describe("buildLauncherScript", () => {
   });
 });
 
-describe("awaitWsEndpoint", () => {
-  it("resolves with the wsUrl when the line is on stderr", async () => {
-    const { proc, stderr } = fakeProc();
-    const p = awaitWsEndpoint(proc, 5_000);
-    setImmediate(() => stderr.push("starting up...\nWebsocket endpoint: ws://127.0.0.1:55555/abc\n"));
-    const wsUrl = await p;
-    assert.equal(wsUrl, "ws://127.0.0.1:55555/abc");
+describe("awaitWsEndpoint (file-based handshake)", () => {
+  it("resolves when the python wrapper writes the handshake file", async () => {
+    const { file, cleanup } = await tmpHandshakeFile();
+    try {
+      const { proc } = fakeProc();
+      const p = awaitWsEndpoint(proc, file, 5_000);
+      setImmediate(() => atomicWriteHandshake(file, "ws://127.0.0.1:55555/abc"));
+      const wsUrl = await p;
+      assert.equal(wsUrl, "ws://127.0.0.1:55555/abc");
+    } finally {
+      await cleanup();
+    }
   });
 
-  it("resolves when the line is on stdout", async () => {
-    const { proc, stdout } = fakeProc();
-    const p = awaitWsEndpoint(proc, 5_000);
-    setImmediate(() => stdout.push("Websocket endpoint: ws://127.0.0.1:1/x"));
-    const wsUrl = await p;
-    assert.equal(wsUrl, "ws://127.0.0.1:1/x");
+  it("rejects when the process exits before the file appears", async () => {
+    const { file, cleanup } = await tmpHandshakeFile();
+    try {
+      const { proc, stderr, emitExit } = fakeProc();
+      const p = awaitWsEndpoint(proc, file, 5_000);
+      setImmediate(() => {
+        stderr.push("ImportError: No module named camoufox\n");
+        emitExit(1);
+      });
+      await assert.rejects(p, /exited.*before emitting Websocket endpoint/);
+    } finally {
+      await cleanup();
+    }
   });
 
-  it("rejects when the process exits before emitting the endpoint", async () => {
-    const { proc, stderr, emitExit } = fakeProc();
-    const p = awaitWsEndpoint(proc, 5_000);
-    setImmediate(() => {
-      stderr.push("ImportError: No module named camoufox\n");
-      emitExit(1);
-    });
-    await assert.rejects(p, /exited.*before emitting Websocket endpoint/);
+  it("captures stderr tail in the failure message", async () => {
+    const { file, cleanup } = await tmpHandshakeFile();
+    try {
+      const { proc, stderr, emitExit } = fakeProc();
+      const p = awaitWsEndpoint(proc, file, 5_000);
+      setImmediate(() => {
+        stderr.push("FATAL: my unique diagnostic string-12345");
+        emitExit(2);
+      });
+      await assert.rejects(p, /unique diagnostic string-12345/);
+    } finally {
+      await cleanup();
+    }
   });
 
   it("rejects on timeout", async () => {
-    const { proc } = fakeProc();
-    const p = awaitWsEndpoint(proc, 50);
-    await assert.rejects(p, /Timed out.*Websocket endpoint/);
+    const { file, cleanup } = await tmpHandshakeFile();
+    try {
+      const { proc } = fakeProc();
+      const p = awaitWsEndpoint(proc, file, 50);
+      await assert.rejects(p, /Timed out.*Websocket endpoint/);
+    } finally {
+      await cleanup();
+    }
   });
 
-  it("handles the line being split across multiple chunks", async () => {
-    const { proc, stderr } = fakeProc();
-    const p = awaitWsEndpoint(proc, 5_000);
-    setImmediate(() => {
-      stderr.push("Websocket endpo");
-      setImmediate(() => stderr.push("int: ws://1.2.3.4:9/path\n"));
-    });
-    const wsUrl = await p;
-    assert.equal(wsUrl, "ws://1.2.3.4:9/path");
+  it("ignores ANSI / log noise in the proc stderr — only the file matters", async () => {
+    const { file, cleanup } = await tmpHandshakeFile();
+    try {
+      const { proc, stderr } = fakeProc();
+      const p = awaitWsEndpoint(proc, file, 5_000);
+      setImmediate(() => {
+        // Whatever camoufox prints (with or without colour) is irrelevant —
+        // the handshake only triggers when the file lands.
+        stderr.push("\x1b[93mWebsocket endpoint:\x1b[0m \x1b[36mws://decoy:0/garbage\x1b[0m\n");
+      });
+      // No file write yet → nothing to resolve. After we write the real one, it should resolve.
+      setTimeout(() => atomicWriteHandshake(file, "ws://real:1234/path"), 100);
+      const wsUrl = await p;
+      assert.equal(wsUrl, "ws://real:1234/path");
+    } finally {
+      await cleanup();
+    }
   });
 });
 

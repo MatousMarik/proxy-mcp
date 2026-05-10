@@ -29,10 +29,22 @@ export interface SpoofOptions {
   preset?: string;           // browser preset name → selects impitBrowser
 }
 
+export interface FingerprintRuntimeStatus {
+  name: string;
+  ready: boolean;
+  detail?: string;
+}
+
 export interface FingerprintRuntimeCheck {
   status: "success";
   ready: boolean;
   backend: string;
+  /**
+   * Per-backend readiness so callers can render multi-backend UIs without
+   * re-querying. Today there's a single backend (impit-node); the array
+   * keeps the contract forward-compatible if more land later.
+   */
+  runtimes: FingerprintRuntimeStatus[];
 }
 
 // ── Utilities (kept from original — still needed) ──
@@ -177,12 +189,23 @@ export async function spoofedRequest(url: string, opts: SpoofOptions): Promise<S
  * Check fingerprint spoofing backend readiness.
  */
 export async function checkSpoofRuntime(): Promise<FingerprintRuntimeCheck> {
+  let impitReady = false;
+  let impitDetail: string | undefined;
   try {
-    new Impit({ browser: "chrome131" as any });
-    return { status: "success", ready: true, backend: "impit-node" };
-  } catch {
-    return { status: "success", ready: false, backend: "impit-node" };
+    new Impit({ browser: "chrome131" as unknown as never });
+    impitReady = true;
+  } catch (e) {
+    impitDetail = (e as Error).message;
   }
+  const runtimes: FingerprintRuntimeStatus[] = [
+    { name: "impit-node", ready: impitReady, ...(impitDetail ? { detail: impitDetail } : {}) },
+  ];
+  return {
+    status: "success",
+    ready: impitReady,
+    backend: "impit-node",
+    runtimes,
+  };
 }
 
 // ── Shutdown ──
