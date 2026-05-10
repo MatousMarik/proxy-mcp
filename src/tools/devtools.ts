@@ -28,7 +28,7 @@ import { dirname } from "node:path";
 import { createHash } from "node:crypto";
 import { proxyManager } from "../state.js";
 import { truncateResult } from "../utils.js";
-import { getEntry, getPageForTarget } from "../browser/session.js";
+import { getEntry, getBrowserEntry, getPageForTarget } from "../browser/session.js";
 
 function errorToString(e: unknown): string {
   if (e instanceof Error) return e.message;
@@ -116,7 +116,7 @@ export function registerDevToolsTools(server: McpServer): void {
     },
     async ({ target_id, selector, mode }) => {
       try {
-        const page = getPageForTarget(target_id);
+        const page = await getPageForTarget(target_id);
         const snapshot = await page.locator(selector).ariaSnapshot({ mode });
         return {
           content: [{
@@ -151,7 +151,7 @@ export function registerDevToolsTools(server: McpServer): void {
     },
     async ({ target_id, file_path, format, full_page, quality }) => {
       try {
-        const page = getPageForTarget(target_id);
+        const page = await getPageForTarget(target_id);
         const buffer = await page.screenshot({
           type: format,
           fullPage: full_page,
@@ -198,7 +198,7 @@ export function registerDevToolsTools(server: McpServer): void {
     },
     async ({ target_id, types, text_filter, offset, limit }) => {
       try {
-        const entry = getEntry(target_id);
+        const entry = getBrowserEntry(target_id);
         let msgs = entry.consoleBuffer;
         if (types && types.length > 0) {
           const set = new Set(types.map((t) => t.toLowerCase()));
@@ -253,7 +253,7 @@ export function registerDevToolsTools(server: McpServer): void {
     },
     async ({ target_id, url_filter, domain_filter, name_filter, offset, limit, value_max_chars, full, sort }) => {
       try {
-        const entry = getEntry(target_id);
+        const entry = getBrowserEntry(target_id);
         const cookies = await entry.context.cookies();
 
         const urlNeedle = url_filter?.toLowerCase();
@@ -335,7 +335,7 @@ export function registerDevToolsTools(server: McpServer): void {
     },
     async ({ target_id, cookie_id, value_max_chars }) => {
       try {
-        const entry = getEntry(target_id);
+        const entry = getBrowserEntry(target_id);
         const cookies = await entry.context.cookies();
         const found = cookies.find((c) => cookieStableId(c) === cookie_id) ?? null;
         if (!found) {
@@ -379,7 +379,7 @@ export function registerDevToolsTools(server: McpServer): void {
     },
     async ({ target_id, storage_type, origin, key_filter, offset, limit, value_max_chars }) => {
       try {
-        const page = getPageForTarget(target_id);
+        const page = await getPageForTarget(target_id);
         const pageUrl = page.url();
         const currentOrigin = getOriginFromUrl(pageUrl);
         if (!currentOrigin) {
@@ -469,7 +469,7 @@ export function registerDevToolsTools(server: McpServer): void {
           return { content: [{ type: "text", text: JSON.stringify({ status: "error", error: `item_id storage_type '${itemType}' does not match requested '${storage_type}'` }) }] };
         }
 
-        const page = getPageForTarget(target_id);
+        const page = await getPageForTarget(target_id);
         const pageUrl = page.url();
         const currentOrigin = getOriginFromUrl(pageUrl);
         if (!currentOrigin) {
@@ -539,7 +539,7 @@ export function registerDevToolsTools(server: McpServer): void {
     },
     async ({ target_id, direction, header_name_filter, method_filter, url_filter, status_filter, hostname_filter, offset, limit, value_max_chars }) => {
       try {
-        const entry = getEntry(target_id);
+        const entry = getBrowserEntry(target_id);
         const since = entry.target.activatedAt;
 
         let traffic = proxyManager.getTraffic().filter((t) => t.timestamp >= since);
@@ -647,7 +647,7 @@ export function registerDevToolsTools(server: McpServer): void {
     },
     async ({ target_id, field_id, value_max_chars }) => {
       try {
-        const entry = getEntry(target_id);
+        const entry = getBrowserEntry(target_id);
         const since = entry.target.activatedAt;
 
         const parts = field_id.split(".");

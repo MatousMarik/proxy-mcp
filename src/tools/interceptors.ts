@@ -195,7 +195,7 @@ export function registerInterceptorTools(server: McpServer): void {
     },
     async ({ target_id, url, wait_until, wait_for_proxy_capture, timeout_ms, poll_interval_ms }) => {
       try {
-        const page = getPageForTarget(target_id);
+        const page = await getPageForTarget(target_id);
         const beforeCount = proxyManager.getTraffic().length;
 
         const response = await page.goto(url, {
@@ -267,13 +267,16 @@ export function registerInterceptorTools(server: McpServer): void {
 
   server.tool(
     "interceptor_browser_close",
-    "Close a browser instance launched by interceptor_browser_launch.",
+    "Close a browser instance launched by interceptor_browser_launch (or interceptor_camoufox_launch).",
     {
-      target_id: z.string().describe("Target ID from interceptor_browser_launch"),
+      target_id: z.string().describe("Target ID from interceptor_browser_launch or interceptor_camoufox_launch"),
     },
     async ({ target_id }) => {
       try {
-        await interceptorManager.deactivate("browser", target_id);
+        const interceptorId = typeof target_id === "string" && target_id.startsWith("camoufox_")
+          ? "camoufox"
+          : "browser";
+        await interceptorManager.deactivate(interceptorId, target_id);
         return {
           content: [{
             type: "text",
