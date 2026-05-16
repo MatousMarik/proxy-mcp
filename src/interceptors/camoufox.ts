@@ -237,7 +237,7 @@ export class CamoufoxInterceptor implements Interceptor {
       description:
         "Launch camoufox (anti-detect Firefox) as a Playwright WS server with proxy + NSS CA trust. " +
         "Drive the returned target_id through the same `interceptor_browser_*` and `humanizer_*` " +
-        "tools as cloakbrowser. Requires Python + `pip install camoufox[geoip]`.",
+        "tools as cloakbrowser. Requires Python + `pip install cloverlabs-camoufox[geoip]`.",
       isActivable: await this.isActivable(),
       activeTargets: [...this.launched.values()].map((e) => e.target),
     };

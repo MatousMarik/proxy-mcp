@@ -600,8 +600,8 @@ Camoufox is a patched Firefox with source-level fingerprint controls (OS, WebGL 
 **Host requirements:**
 
 ```bash
-pip install "camoufox[geoip]"
-python3 -m camoufox fetch          # downloads patched Firefox binary (~200 MB)
+pip install "cloverlabs-camoufox[geoip]"   # active fork; daijro/camoufox stale on Firefox 135 → DataDome distrusts
+python3 -m camoufox fetch official/150.0.2-alpha.26   # Firefox 150; default `fetch` still picks v135 due to repos.yml constraint
 
 # For TLS MITM trust (NSS profile is created per-launch and the proxy CA is imported):
 sudo apt install libnss3-tools     # Debian/Ubuntu
