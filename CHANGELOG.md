@@ -1,6 +1,12 @@
 # Changelog
 
-## Unreleased
+## 3.3.0 — 2026-05-16
+
+### Camoufox dep swap: cloverlabs-camoufox 0.6.0 + Firefox 150
+
+Host requirement change: `pip install "cloverlabs-camoufox[geoip]"` + `python3 -m camoufox fetch official/150.0.2-alpha.26` (cloverlabs's `repos.yml` still gates the Official line at `browser.min=beta.19`, so bare `fetch` would otherwise land v135).
+
+Motivation: daijro/camoufox PyPI line was inactive for ~7 months and pinned at Firefox 135. DataDome and other Akamai/PerimeterX-class WAFs classify FF135 as outdated and serve unsolvable captcha challenges (`rt:c`) instead of the auto-solvable interstitial (`rt:i`). Cloverlabs is the active fork with `CONSTRAINTS.MIN_VERSION='alpha.1'`, drop-in `camoufox` import namespace.
 
 ### Behavior change — camoufox JS-execution world model
 
