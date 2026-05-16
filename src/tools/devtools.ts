@@ -711,16 +711,20 @@ export function registerDevToolsTools(server: McpServer): void {
     "Source is loaded from `script_path` (absolute path). The file body is wrapped in an arrow " +
     "function receiving `__args` (so the file may `return value;` directly and access the optional " +
     "args object). " +
-    "Worlds: `isolated` (default, safe — page JS cannot see the call) or `main` (Camoufox-only via " +
-    "`mw:` prefix; REQUIRES `main_world_eval: true` at camoufox launch; fully observable from page). " +
-    "Cloakbrowser does not support main-world evaluate via Playwright — use `interceptor_browser_inject_init_script` for main-world patching there. " +
+    "Worlds: `isolated` (default) or `main` (camoufox-only, requires `main_world_eval: true` at launch). " +
+    "Cloakbrowser (Chromium): `isolated` runs in Playwright's utility world (different `window`, same DOM). " +
+    "`main` is rejected — use `interceptor_browser_inject_init_script` for main-world patching there. " +
+    "Camoufox (cloverlabs/FF150): there is no separate isolated world — both `isolated` and `main` run in the page's main world. " +
+    "Reads are invisible to the page; mutations (`window.x = …`, `Object.defineProperty`, prototype patches) are observable by page scripts. " +
+    "Earlier daijro/FF135 had a Juggler scope that made `isolated` invisible to the page; that scope was removed in cloverlabs. " +
+    "Verify on your installed build with `scripts/camoufox-world-probe.ts`. " +
     "Rate-limit on cloakbrowser before reCAPTCHA: each call emits CDP traffic that behavioural scorers count.",
     {
       target_id: z.string().describe("Target ID from interceptor_browser_launch or interceptor_camoufox_launch"),
       script_path: z.string().describe("Absolute path to a .js file. File body is the function body; use `return` to send a value back."),
       args: z.record(z.unknown()).optional().describe("Optional JSON-serialisable args object, available inside the script as `__args`."),
       world: z.enum(["isolated", "main"]).optional().default("isolated")
-        .describe("`isolated` (default) or `main`. Main world only works on camoufox with `main_world_eval: true`."),
+        .describe("`isolated` (default) or `main`. On current camoufox build (cloverlabs/FF150) both run in the page's main world — arg is accepted but has no observable effect."),
       value_max_chars: z.number().optional().default(HARD_VALUE_CAP_CHARS)
         .describe(`Max characters of the JSON-stringified return value (default: ${HARD_VALUE_CAP_CHARS}).`),
     },
@@ -782,10 +786,11 @@ export function registerDevToolsTools(server: McpServer): void {
   server.tool(
     "interceptor_browser_inject_init_script",
     "Inject a JS file as an init script (Playwright `page.addInitScript`). " +
-    "Runs before any page script on every subsequent navigation/frame, in the isolated world. " +
-    "Safest stealth primitive on cloakbrowser — no DOM artifact, no `Function.toString` leak. " +
-    "On camoufox the script runs in the privileged Juggler scope and does NOT patch the page's main " +
-    "world (see camoufox#48); use the camoufox-add_init_script WebExtension at launch time for main-world patching. " +
+    "Runs before any page script on every subsequent navigation/frame. " +
+    "Cloakbrowser (Chromium): runs in the isolated utility world — no DOM artifact; patches to shared prototypes/globals reach the page main world via utility-world sharing. " +
+    "Camoufox (cloverlabs/FF150): runs directly in the page's main world. Patches (e.g. `Object.defineProperty(navigator, 'webdriver', ...)`) DO apply to the page, but are observable by anti-bot code on the page (`Function.prototype.toString` leak applies). " +
+    "For Camoufox stealth, prefer source-level fingerprint config at launch (`os`, `webgl_config`, `fonts`, `humanize`, …) over JS injection. " +
+    "Earlier daijro/FF135 ran init scripts in a Juggler scope that did NOT reach the page (camoufox#48); cloverlabs/FF150 removed that scope. " +
     "Does NOT affect the currently loaded document — navigate again to apply.",
     {
       target_id: z.string().describe("Target ID from interceptor_browser_launch or interceptor_camoufox_launch"),
@@ -809,7 +814,7 @@ export function registerDevToolsTools(server: McpServer): void {
               backend: isCamoufox ? "camoufox" : "cloakbrowser",
               bytes: source.length,
               note: isCamoufox
-                ? "Camoufox: init script runs in privileged Juggler scope and will NOT patch the page's main world (camoufox#48)."
+                ? "Camoufox (cloverlabs/FF150): init script runs in the page's main world — patches reach the page but are observable by page scripts. Apply on next navigation."
                 : "Applies on next navigation/frame, not the current document.",
             }),
           }],
@@ -824,8 +829,7 @@ export function registerDevToolsTools(server: McpServer): void {
     "interceptor_browser_add_script_tag",
     "Append a <script> element to the current page (Playwright `page.addScriptTag`). " +
     "WARNING: injects a real DOM node visible to MutationObserver, document.scripts, and CSP. " +
-    "Avoid for anti-bot stealth — prefer interceptor_browser_inject_init_script (cloakbrowser) or " +
-    "interceptor_browser_evaluate with world='main' (camoufox + main_world_eval=true).",
+    "Avoid for anti-bot stealth — prefer interceptor_browser_inject_init_script (no DOM node) when you need page-scope execution.",
     {
       target_id: z.string().describe("Target ID from interceptor_browser_launch or interceptor_camoufox_launch"),
       script_path: z.string().describe("Absolute path to a .js file to inject as <script>."),

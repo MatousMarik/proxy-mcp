@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+### Behavior change — camoufox JS-execution world model
+
+The camoufox dep swap to cloverlabs-camoufox 0.6.0 + Firefox 150 (chore branch `cloverlabs-camoufox-v150`) removes the Juggler-scope JS isolation that daijro/FF135 provided. Both `interceptor_browser_evaluate` (any `world`) and `interceptor_browser_inject_init_script` now run in the page's main world.
+
+Consequences for callers:
+
+- `inject_init_script` patches NOW reach the page (`Object.defineProperty(navigator, 'webdriver', ...)` actually affects what site scripts see) — the camoufox#48 limitation no longer applies on this build. The trade: those patches are observable by anti-bot code via `Function.prototype.toString` and `window` enumeration.
+- `interceptor_browser_evaluate` mutations (writes to `window`, prototype patches) become observable to page scripts. Read-only evals stay safe.
+- `world: "main"` and `world: "isolated"` accept the same args for API compatibility but run in the same realm on cloverlabs/FF150. `mw:` prefix and `main_world_eval: true` launch flag are inert.
+
+Tool descriptions, README "Worlds and isolation" section, and `test/integration/browser-js-inject.test.ts` were updated to reflect the new behavior. The probe at `scripts/camoufox-world-probe.ts` re-verifies the model on any installed build.
+
 ## 3.2.0
 
 ### New Features

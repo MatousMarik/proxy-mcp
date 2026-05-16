@@ -45,7 +45,7 @@ const osEnum = z.enum(["windows", "macos", "linux"]);
 export function registerCamoufoxTools(server: McpServer): void {
   server.tool(
     "interceptor_camoufox_launch",
-    "Launch camoufox (anti-detect Firefox) as a Playwright WebSocket server, proxied through proxy-mcp with NSS CA trust. Returns wsUrl — caller drives pages with `firefox.connect(wsUrl)`. Requires `pip install camoufox[geoip]` + `python3 -m camoufox fetch` on the host (and `libnss3-tools` for cert trust).",
+    "Launch camoufox (anti-detect Firefox) as a Playwright WebSocket server, proxied through proxy-mcp with NSS CA trust. Returns wsUrl — caller drives pages with `firefox.connect(wsUrl)`. Requires `pip install cloverlabs-camoufox[geoip]` + `python3 -m camoufox fetch official/150.0.2-alpha.26` on the host (and `libnss3-tools` for cert trust).",
     {
       os: z.union([osEnum, z.array(osEnum)]).optional().describe("Fingerprint OS to emulate (defaults to camoufox random)"),
       webgl_config: z.tuple([z.string(), z.string()]).optional().describe("[vendor, renderer] WebGL pair (must be valid for the chosen OS)"),

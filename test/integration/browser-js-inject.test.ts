@@ -315,10 +315,14 @@ describe("Browser JS inject tools — camoufox (main_world_eval ON)", {
     assert.equal(JSON.parse(r2.value as string), "set-by-mw");
   });
 
-  it("isolated world cannot see main-world globals (camoufox stealth boundary)", { timeout: SUITE_TIMEOUT }, async () => {
-    // After the previous test sets window.__mw_signal in main world, an
-    // isolated eval reads a *different* window object — the global must be absent.
-    const probe = await makeScript("return { mw: window.__mw_signal };");
+  it("on cloverlabs/FF150 both worlds share one realm (no Juggler-scope isolation)", { timeout: SUITE_TIMEOUT }, async () => {
+    // The previous test set window.__mw_signal via world:"main". On
+    // cloverlabs camoufox 0.6+ / Firefox 150 there is no separate isolated
+    // world — both args run in the page's main world. A default-world read
+    // sees the global. If isolation were ever re-introduced, this test
+    // would fail and alert us to update the docs / tool descriptions.
+    // Re-verify with: npx tsx scripts/camoufox-world-probe.ts
+    const probe = await makeScript("return window.__mw_signal;");
     scripts.push(probe);
     const r = parseToolResult(
       await client.callTool({
@@ -327,9 +331,8 @@ describe("Browser JS inject tools — camoufox (main_world_eval ON)", {
       }) as { content: Array<{ text: string }> },
     );
     assert.equal(r.status, "success", JSON.stringify(r));
-    const parsed = JSON.parse(r.value as string) as { mw: unknown };
-    assert.ok(parsed.mw === undefined || parsed.mw === null,
-      `camoufox isolated world should not see main-world global; got ${JSON.stringify(parsed)}`);
+    assert.equal(JSON.parse(r.value as string), "set-by-mw",
+      "cloverlabs/FF150 has no isolated world; default eval should see mw:-set globals. See scripts/camoufox-world-probe.ts.");
   });
 
   it("add_script_tag adds a DOM node visible via document.scripts", { timeout: SUITE_TIMEOUT }, async () => {
