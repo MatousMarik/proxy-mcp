@@ -680,54 +680,53 @@ Playwright-driven tools for the browser target. Each takes a `target_id` directl
 | `interceptor_browser_get_storage_value` | Get one storage value by `item_id` |
 | `interceptor_browser_list_network_fields` | Header field listing from proxy-captured traffic since the browser was launched |
 | `interceptor_browser_get_network_field` | Get one full header field value by `field_id` |
-| `interceptor_browser_evaluate` | Run a JS file in the page (file body wrapped as `(__args) => { ... }`); returns the result. `world: "isolated"` (default, stealthy) or `world: "main"` (camoufox-only, requires `main_world_eval: true` at launch) |
-| `interceptor_browser_inject_init_script` | Inject a JS file as `page.addInitScript` — runs before every page script on the next navigation. Safest stealth primitive on cloakbrowser; on camoufox runs in privileged Juggler scope and does NOT patch main world ([camoufox#48](https://github.com/daijro/camoufox/issues/48)) |
+| `interceptor_browser_evaluate` | Run a JS file in the page (file body wrapped as `(__args) => { ... }`); returns the result. `world: "isolated"` (default) or `world: "main"` (camoufox-only, requires `main_world_eval: true` at launch). On current camoufox build (cloverlabs/FF150) both args run in page main world — mutations are page-visible |
+| `interceptor_browser_inject_init_script` | Inject a JS file as `page.addInitScript` — runs before every page script on the next navigation. Cloakbrowser: isolated utility world. Camoufox (cloverlabs/FF150): page main world directly — patches reach the page but are observable by page scripts (`Function.prototype.toString` leak applies) |
 | `interceptor_browser_add_script_tag` | Append a `<script>` to the current page. **DOM-visible — avoid for stealth.** Use for benign payloads where main-world execution + page visibility is intentional |
 
 Network data is sourced from the MITM proxy rather than a browser-side protocol — the proxy sees every wire request regardless of what the browser reported.
 
 **Stealth tradeoffs for JS injection:**
 
-| Method | Cloakbrowser | Camoufox |
+| Method | Cloakbrowser | Camoufox (cloverlabs/FF150) |
 |---|---|---|
-| `evaluate` isolated | Safe (isolated utility world) — rate-limit before reCAPTCHA, each call is CDP traffic | Safe (Juggler isolated world, invisible to page JS) |
-| `evaluate` main | Not supported by Playwright API | Supported via `mw:` prefix, requires `main_world_eval: true` at launch; fully observable from page |
-| `inject_init_script` | **Best for stealth** — pre-document, no DOM artifact | Stealthy but inert for main-world patching ([camoufox#48](https://github.com/daijro/camoufox/issues/48)); use [camoufox-add_init_script](https://github.com/techinz/camoufox-add_init_script) WebExtension instead |
+| `evaluate` isolated | Safe (isolated utility world) — rate-limit before reCAPTCHA, each call is CDP traffic | Runs in page main world; reads are invisible, mutations are page-observable |
+| `evaluate` main | Not supported by Playwright API | Same realm as `isolated` on this build (`mw:` prefix is a no-op) |
+| `inject_init_script` | **Best for stealth** — pre-document, no DOM artifact | Patches reach the page (good) but are observable via `Function.prototype.toString` and `window` enumeration; not stealth-safe for high-tier WAFs |
 | `add_script_tag` | Detectable (DOM node, MutationObserver, CSP) | Detectable (same) |
 
-References: [Playwright evaluate](https://playwright.dev/docs/evaluating), [Playwright addInitScript](https://playwright.dev/docs/api/class-page#page-add-init-script), [Camoufox main-world eval](https://camoufox.com/python/main-world-eval/), [Camoufox stealth](https://camoufox.com/stealth/).
+References: [Playwright evaluate](https://playwright.dev/docs/evaluating), [Playwright addInitScript](https://playwright.dev/docs/api/class-page#page-add-init-script), [Camoufox stealth](https://camoufox.com/stealth/).
 
 #### Worlds and isolation — what your JS can and can't see
 
-The two backends ship different world models. Picking the wrong tool is the most common stealth footgun on Camoufox, so the boundary matters.
+The two backends ship different world models. Picking the wrong tool is the most common stealth footgun, so the boundary matters.
 
-**Cloakbrowser (Chromium).** Playwright's `evaluate` runs in an isolated "utility" world that *shares globals with the page's main world*. An `addInitScript` patch to `navigator.webdriver` is visible to (a) your subsequent `evaluate` probes AND (b) anti-bot code the site loads. This is the model most "stealth playbooks" assume. Detection vectors are CDP-side (`Runtime.evaluate` chatter) — cloakbrowser's C++ patches mitigate those. The 48 source patches scrub the JS-observable leaks (`__playwright__binding__`, stack-trace `sourceURL` hints) at compile time.
+**Cloakbrowser (Chromium).** Playwright's `evaluate` runs in an isolated "utility" world that *shares globals with the page's main world*. An `addInitScript` patch to `navigator.webdriver` is visible to (a) your subsequent `evaluate` probes AND (b) anti-bot code the site loads. This is the model most "stealth playbooks" assume. Detection vectors are CDP-side (`Runtime.evaluate` chatter) — cloakbrowser's C++ patches mitigate those.
 
-**Camoufox (Firefox via Juggler).** Two strictly separated JS heaps:
+**Camoufox (cloverlabs ≥0.6 + Firefox 150 — current build).** No separate JS world. `page.evaluate` and `page.addInitScript` both run in the page's main world, the same realm as a real `<script>` tag. Implications:
 
-- **Main world** — the page's real `window`. Site scripts, anti-bot fingerprint code, and tags injected via `addScriptTag` run here.
-- **Isolated/Juggler world** — Playwright's private scope. Different `window` object, same DOM. `evaluate` (without `mw:`) and `addInitScript` both land here.
+- `inject_init_script` patches reach the page (e.g. `Object.defineProperty(navigator, 'webdriver', ...)` does affect what site scripts see). The DOWNSIDE: the patch is observable to anti-bot code on the page — `Function.prototype.toString.toString()` reveals replaced functions, `Object.defineProperty` hooks see the call.
+- `interceptor_browser_evaluate` reads are invisible (no `window` writes, no prototype changes). Mutating evals (`() => { window.x = 1 }`) are observable.
+- `world: "isolated"` and `world: "main"` accept the same args for API compatibility but run in the same realm. The `mw:` prefix and `main_world_eval: true` launch flag are accepted for backward-compat but have no observable effect on this build.
 
-Consequence: an `addInitScript` that does `Object.defineProperty(navigator, 'webdriver', { get: () => false })` patches the *isolated* `navigator`. Your subsequent `evaluate` probe reads from the *same* isolated scope, sees the patched value, and returns `false`. The test passes. **But the site's detection code runs in main world and reads the unpatched `navigator`.** The patch is invisible to it. This is exactly [camoufox#48](https://github.com/daijro/camoufox/issues/48).
+Verify behavior on your installed build:
 
-| Read | Reads from | Sees init-script patch? |
-|---|---|---|
-| `interceptor_browser_evaluate` (no `world`) | isolated | yes |
-| `interceptor_browser_evaluate world: "main"` (camoufox) | main | **no** |
-| Anti-bot JS loaded by the site | main | **no** |
+```bash
+npx tsx scripts/camoufox-world-probe.ts --venv=/path/to/camoufox-venv
+```
 
-This isn't a Camoufox bug; it's the design. Camoufox spoofs fingerprints in the **C++ binary** (configured at launch via `os`, `fonts`, `webgl_config`, `humanize`, etc.) so main-world JS sees the spoofed values *as if they were the real ones*. The Chromium-era playbook of "patch at runtime via `addInitScript`" is what Camoufox is replacing.
+**Historical note.** Earlier daijro/camoufox (Firefox 135 line) ran `evaluate` and `addInitScript` in a separate Juggler scope that was invisible to the page — patches there did NOT reach site scripts ([camoufox#48](https://github.com/daijro/camoufox/issues/48)), but automation JS was equally invisible to anti-bot code. Cloverlabs/FF150 dropped that isolation. If your workflow depends on Juggler-scope invisibility, stay on daijro/FF135.
 
 **Practical rules:**
 
-| Use case | Cloakbrowser | Camoufox |
+| Use case | Cloakbrowser | Camoufox (cloverlabs/FF150) |
 |---|---|---|
-| Read DOM / extract data | `interceptor_browser_evaluate` (isolated) | `interceptor_browser_evaluate` (isolated) |
-| Modify page state, click via JS | `interceptor_browser_evaluate` (isolated; globals are shared) | `interceptor_browser_evaluate` with `world: "main"` + launch `main_world_eval: true` |
-| Spoof navigator / window fingerprints | `interceptor_browser_inject_init_script` | **Configure at launch (`os`, `fonts`, `webgl_config`, `humanize`, `firefox_user_prefs`).** `inject_init_script` will look like it worked from your isolated probes, but the page won't see it. |
-| Load a 3rd-party JS lib into the page | `interceptor_browser_add_script_tag` (page sees it — usually OK if intentional) | Same — runs in main world (good for the use case), but DOM node is detectable |
+| Read DOM / extract data | `interceptor_browser_evaluate` (isolated) | `interceptor_browser_evaluate` — reads don't leak |
+| Modify page state, click via JS | `interceptor_browser_evaluate` (isolated; globals are shared) | `interceptor_browser_evaluate` — mutations are page-visible; use sparingly on stealth-sensitive targets |
+| Spoof navigator / window fingerprints | `interceptor_browser_inject_init_script` | **Configure at launch (`os`, `fonts`, `webgl_config`, `humanize`, `firefox_user_prefs`).** Source-level patches are invisible. `inject_init_script` works but its patches are observable. |
+| Load a 3rd-party JS lib into the page | `interceptor_browser_add_script_tag` (page sees it — usually OK if intentional) | Same — runs in main world; DOM node is detectable |
 
-Strong stealth corollary on Camoufox: anti-bot code running in main world **literally cannot observe** your `evaluate` reads. No `Function.toString` leak, no stack frames in page scripts, no shadow globals. It's a different world. The same isolation that makes `addInitScript` "fail" makes scraping unobservable.
+**Stealth note**: on the current camoufox build, every JS-level mutation from automation is observable by anti-bot code on the page. Prefer source-level configuration over runtime patching. Use `evaluate` for reads, not writes, when stealth matters.
 
 ### Sessions (13)
 
