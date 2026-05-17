@@ -10,17 +10,21 @@
  * across both engines.
  */
 
-import { firefox, type Browser, type BrowserContext, type Page } from "playwright-core";
+import { firefox, type Browser, type BrowserContext, type ConsoleMessage, type Page } from "playwright-core";
 import { interceptorManager } from "../interceptors/manager.js";
-import type { BrowserInterceptor, BrowserTargetEntry } from "../interceptors/browser.js";
+import type { BrowserInterceptor, BrowserTargetEntry, ConsoleEntry } from "../interceptors/browser.js";
 import type { CamoufoxInterceptor, CamoufoxTargetEntry } from "../interceptors/camoufox.js";
 
 interface CamoufoxDriverHandle {
   browser?: Browser;
   context?: BrowserContext;
   page?: Page;
+  consoleBuffer?: ConsoleEntry[];
+  consolePage?: Page;
 }
 type CamoufoxEntryWithDriver = CamoufoxTargetEntry & CamoufoxDriverHandle;
+
+const CONSOLE_BUFFER_MAX = 500;
 
 function getBrowserInterceptor(): BrowserInterceptor {
   const it = interceptorManager.get("browser") as BrowserInterceptor | undefined;
@@ -66,7 +70,29 @@ async function ensureCamoufoxPage(entry: CamoufoxEntryWithDriver): Promise<Page>
   }
   entry.context = ctx;
   entry.page = page;
+  ensureConsoleBuffer(entry, page);
   return page;
+}
+
+function ensureConsoleBuffer(entry: CamoufoxEntryWithDriver, page: Page): ConsoleEntry[] {
+  if (!entry.consoleBuffer) entry.consoleBuffer = [];
+  if (entry.consolePage === page) return entry.consoleBuffer;
+
+  entry.consolePage = page;
+  page.on("console", (msg: ConsoleMessage) => {
+    const loc = msg.location();
+    entry.consoleBuffer?.push({
+      type: msg.type(),
+      text: msg.text(),
+      location: loc.url ? `${loc.url}:${loc.lineNumber ?? 0}:${loc.columnNumber ?? 0}` : "",
+      timestamp: Date.now(),
+    });
+    if (entry.consoleBuffer && entry.consoleBuffer.length > CONSOLE_BUFFER_MAX) {
+      entry.consoleBuffer.splice(0, entry.consoleBuffer.length - CONSOLE_BUFFER_MAX);
+    }
+  });
+
+  return entry.consoleBuffer;
 }
 
 export function getEntry(targetId: string): BrowserTargetEntry | CamoufoxEntryWithDriver {
@@ -109,4 +135,23 @@ export async function getPageForTarget(targetId: string): Promise<Page> {
     throw new Error(`Page for browser target '${targetId}' is closed.`);
   }
   return browserEntry.page;
+}
+
+export async function getContextForTarget(targetId: string): Promise<BrowserContext> {
+  const entry = getEntry(targetId);
+  if (isCamoufoxTargetId(targetId)) {
+    const page = await ensureCamoufoxPage(entry as CamoufoxEntryWithDriver);
+    return page.context();
+  }
+  return (entry as BrowserTargetEntry).context;
+}
+
+export async function getConsoleBufferForTarget(targetId: string): Promise<ConsoleEntry[]> {
+  const entry = getEntry(targetId);
+  if (isCamoufoxTargetId(targetId)) {
+    const camoufoxEntry = entry as CamoufoxEntryWithDriver;
+    const page = await ensureCamoufoxPage(camoufoxEntry);
+    return ensureConsoleBuffer(camoufoxEntry, page);
+  }
+  return (entry as BrowserTargetEntry).consoleBuffer;
 }

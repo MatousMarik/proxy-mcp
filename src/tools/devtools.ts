@@ -28,7 +28,13 @@ import { dirname, isAbsolute } from "node:path";
 import { createHash } from "node:crypto";
 import { proxyManager } from "../state.js";
 import { truncateResult } from "../utils.js";
-import { getEntry, getBrowserEntry, getPageForTarget, isCamoufoxTarget } from "../browser/session.js";
+import {
+  getConsoleBufferForTarget,
+  getContextForTarget,
+  getEntry,
+  getPageForTarget,
+  isCamoufoxTarget,
+} from "../browser/session.js";
 
 function errorToString(e: unknown): string {
   if (e instanceof Error) return e.message;
@@ -110,7 +116,7 @@ export function registerDevToolsTools(server: McpServer): void {
     "Take an ARIA accessibility snapshot of the bound page (YAML-formatted role tree). " +
     "Great for LLM-driven page understanding without parsing HTML.",
     {
-      target_id: z.string().describe("Target ID from interceptor_browser_launch"),
+      target_id: z.string().describe("Target ID from interceptor_browser_launch or interceptor_camoufox_launch"),
       selector: z.string().optional().default("body").describe("Root selector to snapshot (default: 'body')"),
       mode: z.enum(["default", "ai"]).optional().default("default").describe("Snapshot mode — 'ai' adds ref attributes for locator reuse"),
     },
@@ -143,7 +149,7 @@ export function registerDevToolsTools(server: McpServer): void {
     "interceptor_browser_screenshot",
     "Take a screenshot of the bound page. Saves to file_path if provided; otherwise reports byte count without embedding the image.",
     {
-      target_id: z.string().describe("Target ID from interceptor_browser_launch"),
+      target_id: z.string().describe("Target ID from interceptor_browser_launch or interceptor_camoufox_launch"),
       file_path: z.string().optional().describe("Optional path to save screenshot"),
       format: z.enum(["png", "jpeg"]).optional().default("png").describe("Image format (default: png)"),
       full_page: z.boolean().optional().default(false).describe("Capture the full scrollable page"),
@@ -190,7 +196,7 @@ export function registerDevToolsTools(server: McpServer): void {
     "interceptor_browser_list_console",
     "List console messages buffered since the browser was launched. Types: log, info, warning, error, debug, etc.",
     {
-      target_id: z.string().describe("Target ID from interceptor_browser_launch"),
+      target_id: z.string().describe("Target ID from interceptor_browser_launch or interceptor_camoufox_launch"),
       types: z.array(z.string()).optional().describe("Filter by console message types"),
       text_filter: z.string().optional().describe("Filter by text substring"),
       offset: z.number().optional().default(0).describe("Offset into results (default: 0)"),
@@ -198,8 +204,7 @@ export function registerDevToolsTools(server: McpServer): void {
     },
     async ({ target_id, types, text_filter, offset, limit }) => {
       try {
-        const entry = getBrowserEntry(target_id);
-        let msgs = entry.consoleBuffer;
+        let msgs = await getConsoleBufferForTarget(target_id);
         if (types && types.length > 0) {
           const set = new Set(types.map((t) => t.toLowerCase()));
           msgs = msgs.filter((m) => set.has(m.type.toLowerCase()));
@@ -239,7 +244,7 @@ export function registerDevToolsTools(server: McpServer): void {
     "interceptor_browser_list_cookies",
     "List cookies from the browser context with pagination and truncated value previews.",
     {
-      target_id: z.string().describe("Target ID from interceptor_browser_launch"),
+      target_id: z.string().describe("Target ID from interceptor_browser_launch or interceptor_camoufox_launch"),
       url_filter: z.string().optional().describe("Filter cookies by domain/path substring"),
       domain_filter: z.string().optional().describe("Filter cookies by domain substring"),
       name_filter: z.string().optional().describe("Filter cookies by name substring"),
@@ -253,8 +258,8 @@ export function registerDevToolsTools(server: McpServer): void {
     },
     async ({ target_id, url_filter, domain_filter, name_filter, offset, limit, value_max_chars, full, sort }) => {
       try {
-        const entry = getBrowserEntry(target_id);
-        const cookies = await entry.context.cookies();
+        const context = await getContextForTarget(target_id);
+        const cookies = await context.cookies();
 
         const urlNeedle = url_filter?.toLowerCase();
         const domainNeedle = domain_filter?.toLowerCase();
@@ -328,15 +333,15 @@ export function registerDevToolsTools(server: McpServer): void {
     "interceptor_browser_get_cookie",
     "Get one cookie by cookie_id with full value (subject to a hard cap to keep output bounded).",
     {
-      target_id: z.string().describe("Target ID from interceptor_browser_launch"),
+      target_id: z.string().describe("Target ID from interceptor_browser_launch or interceptor_camoufox_launch"),
       cookie_id: z.string().describe("cookie_id from interceptor_browser_list_cookies"),
       value_max_chars: z.number().optional().default(HARD_VALUE_CAP_CHARS)
         .describe(`Max characters for cookie value (default: ${HARD_VALUE_CAP_CHARS})`),
     },
     async ({ target_id, cookie_id, value_max_chars }) => {
       try {
-        const entry = getBrowserEntry(target_id);
-        const cookies = await entry.context.cookies();
+        const context = await getContextForTarget(target_id);
+        const cookies = await context.cookies();
         const found = cookies.find((c) => cookieStableId(c) === cookie_id) ?? null;
         if (!found) {
           return { content: [{ type: "text", text: JSON.stringify({ status: "error", error: `Cookie '${cookie_id}' not found. Re-run list tool.` }) }] };
@@ -368,7 +373,7 @@ export function registerDevToolsTools(server: McpServer): void {
     "interceptor_browser_list_storage_keys",
     "List localStorage/sessionStorage keys for the current origin with pagination and truncated value previews.",
     {
-      target_id: z.string().describe("Target ID from interceptor_browser_launch"),
+      target_id: z.string().describe("Target ID from interceptor_browser_launch or interceptor_camoufox_launch"),
       storage_type: z.enum(["local", "session"]).describe("Storage type"),
       origin: z.string().optional().describe("Optional origin override (must match current page origin)"),
       key_filter: z.string().optional().describe("Filter by key substring"),
@@ -449,7 +454,7 @@ export function registerDevToolsTools(server: McpServer): void {
     "interceptor_browser_get_storage_value",
     "Get one localStorage/sessionStorage value by item_id.",
     {
-      target_id: z.string().describe("Target ID from interceptor_browser_launch"),
+      target_id: z.string().describe("Target ID from interceptor_browser_launch or interceptor_camoufox_launch"),
       storage_type: z.enum(["local", "session"]).describe("Storage type"),
       item_id: z.string().describe("item_id from interceptor_browser_list_storage_keys"),
       origin: z.string().optional().describe("Optional origin override (must match current page origin)"),
@@ -525,7 +530,7 @@ export function registerDevToolsTools(server: McpServer): void {
     "interceptor_browser_list_network_fields",
     "List request/response header fields from proxy-captured traffic since the browser was launched, with pagination and truncation.",
     {
-      target_id: z.string().describe("Target ID from interceptor_browser_launch"),
+      target_id: z.string().describe("Target ID from interceptor_browser_launch or interceptor_camoufox_launch"),
       direction: z.enum(["request", "response", "both"]).optional().default("both").describe("Header direction (default: both)"),
       header_name_filter: z.string().optional().describe("Filter by header name substring"),
       method_filter: z.string().optional().describe("Filter by HTTP method"),
@@ -539,7 +544,7 @@ export function registerDevToolsTools(server: McpServer): void {
     },
     async ({ target_id, direction, header_name_filter, method_filter, url_filter, status_filter, hostname_filter, offset, limit, value_max_chars }) => {
       try {
-        const entry = getBrowserEntry(target_id);
+        const entry = getEntry(target_id);
         const since = entry.target.activatedAt;
 
         let traffic = proxyManager.getTraffic().filter((t) => t.timestamp >= since);
@@ -640,14 +645,14 @@ export function registerDevToolsTools(server: McpServer): void {
     "interceptor_browser_get_network_field",
     "Get one full header field value from proxy-captured traffic by field_id.",
     {
-      target_id: z.string().describe("Target ID from interceptor_browser_launch"),
+      target_id: z.string().describe("Target ID from interceptor_browser_launch or interceptor_camoufox_launch"),
       field_id: z.string().describe("field_id from interceptor_browser_list_network_fields"),
       value_max_chars: z.number().optional().default(HARD_VALUE_CAP_CHARS)
         .describe(`Max characters for returned value (default: ${HARD_VALUE_CAP_CHARS})`),
     },
     async ({ target_id, field_id, value_max_chars }) => {
       try {
-        const entry = getBrowserEntry(target_id);
+        const entry = getEntry(target_id);
         const since = entry.target.activatedAt;
 
         const parts = field_id.split(".");

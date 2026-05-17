@@ -595,7 +595,7 @@ Stealth is source-level: cloakbrowser ships 48+ C++ patches so ja3n/ja4/akamai m
 | `interceptor_camoufox_list` | List active camoufox instances and their fingerprint details |
 | `interceptor_camoufox_close` | Stop the launcher, remove the temp launcher dir + NSS profile |
 
-Camoufox is a patched Firefox with source-level fingerprint controls (OS, WebGL vendor/renderer, fonts, locale, geoip-derived timezone, WebRTC blocking, humanize cursor). Unlike the Chromium path, camoufox runs as an external Python process and exposes a Playwright WS endpoint — the caller drives pages with `await firefox.connect(wsUrl)` instead of going through MCP page tools.
+Camoufox is a patched Firefox with source-level fingerprint controls (OS, WebGL vendor/renderer, fonts, locale, geoip-derived timezone, WebRTC blocking, humanize cursor). Camoufox runs as an external Python process and exposes a Playwright WS endpoint, but proxy-mcp also binds the returned `camoufox_*` target to the same `interceptor_browser_*` and `humanizer_*` tools used by cloakbrowser. Use the exposed `wsUrl` only when you need custom Playwright code outside MCP.
 
 **Host requirements:**
 
@@ -616,7 +616,11 @@ If `certutil` is missing, the launch still succeeds but the proxy CA is not trus
 ```text
 proxy_start                                     // start the MITM proxy
 interceptor_camoufox_launch { headless: true }  // returns { targetId, wsUrl, playwright_connect, ... }
-// in your own Node code:
+interceptor_browser_navigate --target_id "camoufox_<id>" --url "https://example.com"
+interceptor_browser_snapshot --target_id "camoufox_<id>" --mode ai
+interceptor_browser_list_console --target_id "camoufox_<id>"
+interceptor_browser_list_cookies --target_id "camoufox_<id>"
+// Or in your own Node code:
 //   import { firefox } from 'playwright-core';
 //   const browser = await firefox.connect(wsUrl);
 //   const page = await (await browser.newContext()).newPage();

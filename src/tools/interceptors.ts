@@ -184,7 +184,7 @@ export function registerInterceptorTools(server: McpServer): void {
     "interceptor_browser_navigate",
     "Navigate the browser target's page via Playwright and optionally wait for matching host traffic to be captured by the proxy.",
     {
-      target_id: z.string().describe("Target ID from interceptor_browser_launch"),
+      target_id: z.string().describe("Target ID from interceptor_browser_launch or interceptor_camoufox_launch"),
       url: z.string().describe("Destination URL"),
       wait_until: z.enum(["load", "domcontentloaded", "networkidle", "commit"]).optional().default("domcontentloaded")
         .describe("Playwright wait condition (default: domcontentloaded)"),

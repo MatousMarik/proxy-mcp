@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- **Camoufox MCP parity:** `camoufox_*` targets now work with console and
+  cookie listing through `interceptor_browser_list_console`,
+  `interceptor_browser_list_cookies`, and `interceptor_browser_get_cookie`.
+  This brings the browser-tier tooling in line with the existing shared
+  navigate/snapshot/screenshot/evaluate/injection/humanizer path.
+
 ## 3.3.0 — 2026-05-16
 
 ### Camoufox dep swap: cloverlabs-camoufox 0.6.0 + Firefox 150
@@ -35,7 +43,8 @@ Tool descriptions, README "Worlds and isolation" section, and `test/integration/
 
 ### New Features
 
-- **Camoufox interceptor — anti-detect Firefox via Playwright WS.** New `CamoufoxInterceptor` (id `camoufox`) spawns `camoufox.server.launch_server()` as a Python subprocess, parses the emitted Websocket endpoint, and exposes it. Caller drives pages with `await firefox.connect(wsUrl)` instead of going through MCP page tools. Proxy + NSS CA trust are pre-wired at launch time so `geoip: true` resolves locale/timezone from the proxy exit IP.
+- **Camoufox interceptor — anti-detect Firefox via Playwright WS.** New `CamoufoxInterceptor` (id `camoufox`) spawns `camoufox.server.launch_server()` as a Python subprocess, parses the emitted Websocket endpoint, and exposes it. The `wsUrl` allows custom Playwright code via `await firefox.connect(wsUrl)`. Proxy + NSS CA trust are pre-wired at launch time so `geoip: true` resolves locale/timezone from the proxy exit IP.
+- Follow-up releases bind `camoufox_*` target IDs to the shared `interceptor_browser_*` and `humanizer_*` MCP tool path; direct `firefox.connect(wsUrl)` remains available for custom Playwright code.
 - **4 new tools:** `interceptor_camoufox_launch`, `interceptor_camoufox_info`, `interceptor_camoufox_list`, `interceptor_camoufox_close`. Launch params expose camoufox's full fingerprint surface: `os`, `webgl_config`, `fonts`, `humanize`, `headless`, `addons`, `main_world_eval`, `enable_cache`, `disable_coop`, `block_webrtc`, `block_webgl`, `block_images`, `locale`, `geoip`, `port`, `ws_path`, `python_executable`, `trust_proxy_cert`, plus a raw `config` escape hatch.
 - **New resource `proxy://camoufox/targets`.** Mirror of `proxy://browser/targets` for camoufox instances.
 
