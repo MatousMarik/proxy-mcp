@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 3.3.1 — 2026-05-17
 
 - **Camoufox MCP parity:** `camoufox_*` targets now work with console and
   cookie listing through `interceptor_browser_list_console`,
