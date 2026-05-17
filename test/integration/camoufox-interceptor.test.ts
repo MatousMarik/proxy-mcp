@@ -56,9 +56,16 @@ function pidAlive(pid: number): boolean {
   }
 }
 
+function expectedHostOs(): string | undefined {
+  if (process.platform === "linux") return "linux";
+  if (process.platform === "darwin") return "macos";
+  if (process.platform === "win32") return "windows";
+  return undefined;
+}
+
 const SUITE_TIMEOUT = 90_000;
 
-describe("Camoufox interceptor (integration)", { skip: !camoufoxAvailable() ? "camoufox not installed (pip install camoufox[geoip])" : false }, () => {
+describe("Camoufox interceptor (integration)", { skip: !camoufoxAvailable() ? "camoufox not installed (pip install cloverlabs-camoufox[geoip] && python3 -m camoufox fetch official/150.0.2-alpha.26)" : false }, () => {
   let client: Client;
   let targetId: string;
   let wsUrl: string;
@@ -114,6 +121,12 @@ describe("Camoufox interceptor (integration)", { skip: !camoufoxAvailable() ? "c
     wsUrl = launchRes.wsUrl as string;
     assert.match(targetId, /^camoufox_\d+_\d+$/);
     assert.match(wsUrl, /^ws:\/\//);
+    const fingerprint = launchRes.fingerprint as Record<string, unknown>;
+    assert.equal(fingerprint.os_source, "host_default");
+    if (expectedHostOs()) assert.equal(fingerprint.os, expectedHostOs());
+    assert.match(String(fingerprint.user_agent), /Firefox\/150/);
+    assert.ok(fingerprint.platform, "fingerprint platform should be introspected");
+    assert.ok(fingerprint.webgl, "fingerprint WebGL summary should be introspected");
 
     const fox = interceptorManager.get("camoufox") as CamoufoxInterceptor;
     const entry = fox.getEntry(targetId)!;

@@ -16,7 +16,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ChildProcess } from "node:child_process";
 
-import { buildLauncherScript, awaitWsEndpoint, CamoufoxInterceptor } from "../../src/interceptors/camoufox.js";
+import {
+  buildLauncherScript,
+  awaitWsEndpoint,
+  awaitWsHandshake,
+  hostFingerprintOs,
+  CamoufoxInterceptor,
+} from "../../src/interceptors/camoufox.js";
 
 function fakeProc(): { proc: ChildProcess; stdout: Readable; stderr: Readable; emitExit: (code: number | null) => void } {
   const stdout = new Readable({ read() { /* push manually */ } });
@@ -39,12 +45,25 @@ async function tmpHandshakeFile(): Promise<{ dir: string; file: string; cleanup:
   return { dir, file, cleanup: () => rm(dir, { recursive: true, force: true }) };
 }
 
-async function atomicWriteHandshake(file: string, wsUrl: string): Promise<void> {
+async function atomicWriteHandshake(
+  file: string,
+  wsUrl: string,
+  extra: Record<string, unknown> = {},
+): Promise<void> {
   const dir = file.substring(0, file.lastIndexOf("/"));
   const tmp = join(dir, `.ws-${Date.now()}-${Math.random().toString(36).slice(2)}`);
-  await writeFile(tmp, JSON.stringify({ wsUrl, ts: Math.floor(Date.now() / 1000) }), "utf-8");
+  await writeFile(tmp, JSON.stringify({ wsUrl, ts: Math.floor(Date.now() / 1000), ...extra }), "utf-8");
   await rename(tmp, file);
 }
+
+describe("hostFingerprintOs", () => {
+  it("maps Node platforms to Camoufox OS families", () => {
+    assert.equal(hostFingerprintOs("linux"), "linux");
+    assert.equal(hostFingerprintOs("darwin"), "macos");
+    assert.equal(hostFingerprintOs("win32"), "windows");
+    assert.equal(hostFingerprintOs("freebsd"), undefined);
+  });
+});
 
 describe("buildLauncherScript", () => {
   it("emits a script that imports the camoufox primitives we wrap", () => {
@@ -87,6 +106,14 @@ describe("buildLauncherScript", () => {
     const recovered = m![1].replace(/\\'/g, "'").replace(/\\\\/g, "\\");
     assert.deepEqual(JSON.parse(recovered), params);
   });
+
+  it("emits safe fingerprint introspection without exposing raw launch config", () => {
+    const script = buildLauncherScript({ os: "linux" }, "/tmp/x");
+    assert.match(script, /CAMOU_CONFIG_1/);
+    assert.match(script, /fingerprint_summary = _fingerprint_summary\(config\)/);
+    assert.match(script, /'user_agent': _pick\(cam, 'navigator\.userAgent'\)/);
+    assert.doesNotMatch(script, /json\.dumps\(\{'wsUrl': m\.group\(1\), 'ts': int\(time\.time\(\)\), 'config': config/);
+  });
 });
 
 describe("awaitWsEndpoint (file-based handshake)", () => {
@@ -98,6 +125,26 @@ describe("awaitWsEndpoint (file-based handshake)", () => {
       setImmediate(() => atomicWriteHandshake(file, "ws://127.0.0.1:55555/abc"));
       const wsUrl = await p;
       assert.equal(wsUrl, "ws://127.0.0.1:55555/abc");
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it("returns fingerprint details from the structured handshake", async () => {
+    const { file, cleanup } = await tmpHandshakeFile();
+    try {
+      const { proc } = fakeProc();
+      const p = awaitWsHandshake(proc, file, 5_000);
+      setImmediate(() => atomicWriteHandshake(file, "ws://127.0.0.1:55555/abc", {
+        fingerprint: {
+          os: "linux",
+          user_agent: "Mozilla/5.0 (X11; Linux x86_64; rv:150.0) Gecko/20100101 Firefox/150.0",
+        },
+      }));
+      const handshake = await p;
+      assert.equal(handshake.wsUrl, "ws://127.0.0.1:55555/abc");
+      assert.equal(handshake.fingerprint?.os, "linux");
+      assert.match(String(handshake.fingerprint?.user_agent), /Firefox\/150/);
     } finally {
       await cleanup();
     }

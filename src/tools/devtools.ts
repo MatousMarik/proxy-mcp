@@ -2,8 +2,8 @@
  * Browser DevTools-equivalent MCP tools — Playwright-driven.
  *
  * Replaces the former chrome-devtools-mcp sidecar + CDP bridge. Each tool
- * takes a browser target_id (from interceptor_browser_launch) and drives
- * the bound Playwright Page directly.
+ * takes a target_id from interceptor_browser_launch or
+ * interceptor_camoufox_launch and drives the bound Playwright Page directly.
  *
  * Tools exposed:
  *   interceptor_browser_snapshot          — a11y tree
@@ -719,7 +719,7 @@ export function registerDevToolsTools(server: McpServer): void {
     "Worlds: `isolated` (default) or `main` (camoufox-only, requires `main_world_eval: true` at launch). " +
     "Cloakbrowser (Chromium): `isolated` runs in Playwright's utility world (different `window`, same DOM). " +
     "`main` is rejected — use `interceptor_browser_inject_init_script` for main-world patching there. " +
-    "Camoufox (cloverlabs/FF150): there is no separate isolated world — both `isolated` and `main` run in the page's main world. " +
+    "Camoufox (cloverlabs/FF150): there is no separate isolated world — both permitted modes run in the page's main world. " +
     "Reads are invisible to the page; mutations (`window.x = …`, `Object.defineProperty`, prototype patches) are observable by page scripts. " +
     "Earlier daijro/FF135 had a Juggler scope that made `isolated` invisible to the page; that scope was removed in cloverlabs. " +
     "Verify on your installed build with `scripts/camoufox-world-probe.ts`. " +

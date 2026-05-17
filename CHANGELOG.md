@@ -1,5 +1,14 @@
 # Changelog
 
+## 3.3.2 — 2026-05-17
+
+- **Camoufox OS default + introspection:** `interceptor_camoufox_launch` now
+  defaults fingerprint generation to the host OS instead of Camoufox's upstream
+  random OS list, while still allowing explicit `os` overrides. Launch/list/info
+  responses now include a safe fingerprint summary (resolved OS, UA, platform,
+  OSCPU, screen/window, WebGL, font/voice counts) without exposing raw Camoufox
+  config or process environment.
+
 ## 3.3.1 — 2026-05-17
 
 - **Camoufox MCP parity:** `camoufox_*` targets now work with console and
@@ -24,7 +33,7 @@ Consequences for callers:
 
 - `inject_init_script` patches NOW reach the page (`Object.defineProperty(navigator, 'webdriver', ...)` actually affects what site scripts see) — the camoufox#48 limitation no longer applies on this build. The trade: those patches are observable by anti-bot code via `Function.prototype.toString` and `window` enumeration.
 - `interceptor_browser_evaluate` mutations (writes to `window`, prototype patches) become observable to page scripts. Read-only evals stay safe.
-- `world: "main"` and `world: "isolated"` accept the same args for API compatibility but run in the same realm on cloverlabs/FF150. `mw:` prefix and `main_world_eval: true` launch flag are inert.
+- `world: "main"` and `world: "isolated"` accept the same script args for API compatibility but run in the same realm on cloverlabs/FF150. `main_world_eval: true` still gates explicit `world: "main"` calls; once enabled, the `mw:` prefix does not create a separate realm on this build.
 
 Tool descriptions, README "Worlds and isolation" section, and `test/integration/browser-js-inject.test.ts` were updated to reflect the new behavior. The probe at `scripts/camoufox-world-probe.ts` re-verifies the model on any installed build.
 
@@ -50,7 +59,7 @@ Tool descriptions, README "Worlds and isolation" section, and `test/integration/
 
 ### Notes
 
-- Host requirements (only when using camoufox): Python 3 + `pip install "camoufox[geoip]"` + `python3 -m camoufox fetch` + NSS `certutil` (`libnss3-tools`/`nss-tools`/`brew install nss`). If `certutil` is missing the launcher still runs but the proxy CA is not trusted — HTTPS pages show cert errors and proxy traffic is still captured.
+- Original host requirements used the daijro/camoufox package line. Current Camoufox users should follow the cloverlabs/Firefox 150 install note in 3.3.0 above. NSS `certutil` (`libnss3-tools`/`nss-tools`/`brew install nss`) is still required for proxy CA trust.
 - No new npm dependencies. `playwright-core` (already a runtime dep for cloakbrowser) provides the `firefox.connect(wsUrl)` client.
 - All proxy-side capabilities — traffic capture, TLS fingerprint capture, rules, header injection, mocks, sessions, replay, upstream chaining, JA3 spoofing — apply to camoufox automatically because the proxy sits in front of it.
 

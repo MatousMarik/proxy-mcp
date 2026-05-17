@@ -109,15 +109,14 @@ export function getEntry(targetId: string): BrowserTargetEntry | CamoufoxEntryWi
 
 /**
  * Cloakbrowser-only entry getter. Use when the caller needs cloakbrowser
- * features that camoufox doesn't implement yet — `consoleBuffer` (event
- * recording) or pre-warmed `context` (synchronous cookie access). Camoufox
- * targets get a clear error instead of a deep type-mismatch.
+ * internals rather than the shared page/context helpers. Camoufox targets get
+ * a clear error instead of a deep type-mismatch.
  */
 export function getBrowserEntry(targetId: string): BrowserTargetEntry {
   if (isCamoufoxTargetId(targetId)) {
     throw new Error(
-      `Tool not yet supported on camoufox targets ('${targetId}'). Use cloakbrowser ` +
-      `(interceptor_browser_launch) for console / cookie inspection until camoufox parity lands.`,
+      `Internal cloakbrowser-only entry requested for camoufox target ('${targetId}'). ` +
+      "Use the shared browser tools for camoufox targets.",
     );
   }
   const entry = getBrowserInterceptor().getEntry(targetId);

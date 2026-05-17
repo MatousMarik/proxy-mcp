@@ -25,6 +25,12 @@ function errorToString(e: unknown): string {
   return String(e);
 }
 
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+}
+
 function requireProxy(): { proxyPort: number; certPem: string; certFingerprint: string } {
   if (!proxyManager.isRunning()) {
     throw new Error("Proxy is not running. Start it first with proxy_start.");
@@ -45,16 +51,16 @@ const osEnum = z.enum(["windows", "macos", "linux"]);
 export function registerCamoufoxTools(server: McpServer): void {
   server.tool(
     "interceptor_camoufox_launch",
-    "Launch camoufox (anti-detect Firefox) as a Playwright WebSocket server, proxied through proxy-mcp with NSS CA trust. Returns a camoufox target_id plus wsUrl; drive the target with interceptor_browser_* and humanizer_* tools, or use wsUrl for custom Playwright code. Requires `pip install cloverlabs-camoufox[geoip]` + `python3 -m camoufox fetch official/150.0.2-alpha.26` on the host (and `libnss3-tools` for cert trust).",
+    "Launch camoufox (anti-detect Firefox) as a Playwright WebSocket server, proxied through proxy-mcp with NSS CA trust. Returns a camoufox target_id, wsUrl, and safe fingerprint introspection; drive the target with interceptor_browser_* and humanizer_* tools, or use wsUrl for custom Playwright code. Requires `pip install cloverlabs-camoufox[geoip]` + `python3 -m camoufox fetch official/150.0.2-alpha.26` on the host (and `libnss3-tools` for cert trust).",
     {
-      os: z.union([osEnum, z.array(osEnum)]).optional().describe("Fingerprint OS to emulate (defaults to camoufox random)"),
+      os: z.union([osEnum, z.array(osEnum)]).optional().describe("Fingerprint OS to emulate (default: host OS; pass an array to let Camoufox choose from those OS families)"),
       webgl_config: z.tuple([z.string(), z.string()]).optional().describe("[vendor, renderer] WebGL pair (must be valid for the chosen OS)"),
       fonts: z.array(z.string()).optional().describe("Extra font families to inject (must be installed on the host)"),
       config: z.record(z.unknown()).optional().describe("Raw camoufox config property overrides (advanced)"),
       humanize: z.union([z.boolean(), z.number().positive()]).optional().describe("true = humanize cursor; number = max seconds for cursor humanization"),
       headless: z.union([z.boolean(), z.literal("virtual")]).optional().default(true).describe("true (default), false, or 'virtual' (Xvfb on Linux)"),
       addons: z.array(z.string()).optional().describe("Paths to extracted Firefox addon directories"),
-      main_world_eval: z.boolean().optional().describe("Allow `mw:`-prefixed evaluate() calls in the main world"),
+      main_world_eval: z.boolean().optional().describe("Allow explicit `world: 'main'` evaluate calls. On cloverlabs/FF150 this gates the call but does not create a separate realm."),
       enable_cache: z.boolean().optional().describe("Cache pages/requests (disabled by default)"),
       disable_coop: z.boolean().optional().describe("Disable COOP — needed for Cloudflare Turnstile iframes"),
       block_webrtc: z.boolean().optional().default(true).describe("Block WebRTC to prevent IP leaks (default true)"),
@@ -72,6 +78,7 @@ export function registerCamoufoxTools(server: McpServer): void {
         const proxyInfo = requireProxy();
         const result = await interceptorManager.activate("camoufox", { ...proxyInfo, ...args });
         const details = result.details as Record<string, unknown>;
+        const fingerprint = asRecord(details.fingerprint);
         return {
           content: [{
             type: "text",
@@ -81,7 +88,8 @@ export function registerCamoufoxTools(server: McpServer): void {
               wsUrl: details.wsUrl,
               playwright_connect: details.playwright_connect,
               fingerprint: {
-                os: details.os ?? null,
+                ...fingerprint,
+                os: fingerprint.os ?? details.os ?? null,
                 humanize: details.humanize ?? null,
                 geoip: details.geoip ?? null,
                 locale: details.locale ?? null,

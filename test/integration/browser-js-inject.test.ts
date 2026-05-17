@@ -247,7 +247,7 @@ describe("Browser JS inject tools — cloakbrowser", {
 // ── Camoufox ──────────────────────────────────────────────────────
 
 describe("Browser JS inject tools — camoufox (main_world_eval ON)", {
-  skip: !camoufoxAvailable() ? "camoufox not installed (pip install camoufox[geoip])" : false,
+  skip: !camoufoxAvailable() ? "camoufox not installed (pip install cloverlabs-camoufox[geoip] && python3 -m camoufox fetch official/150.0.2-alpha.26)" : false,
 }, () => {
   let client: Client;
   let cleanup: () => Promise<void>;

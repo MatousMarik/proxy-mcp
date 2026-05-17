@@ -1,17 +1,16 @@
 # proxy-mcp
 
-proxy-mcp is an MCP server that runs an explicit HTTP/HTTPS MITM proxy (L7). It captures requests/responses, lets you modify traffic in-flight (headers/bodies/mock/forward/drop), supports upstream proxy chaining, and records TLS fingerprints for connections to the proxy (JA3/JA4) plus optional upstream server JA3S. Ships "interceptors" to route a stealth browser (cloakbrowser, source-patched Chromium), CLI tools, Docker containers, and Android devices/apps through the proxy, plus Playwright-driven browser automation with locator-based click, typing, scroll, and ARIA snapshots.
+proxy-mcp is an MCP server that runs an explicit HTTP/HTTPS MITM proxy (L7). It captures requests/responses, lets you modify traffic in-flight (headers/bodies/mock/forward/drop), supports upstream proxy chaining, and records TLS fingerprints for connections to the proxy (JA3/JA4) plus optional upstream server JA3S. Ships "interceptors" to route stealth browsers (cloakbrowser and Camoufox), CLI tools, Docker containers, and Android devices/apps through the proxy, plus Playwright-driven browser automation with locator-based click, typing, scroll, and ARIA snapshots.
 
-75 tools + 7 resources + 3 resource templates. Built on [mockttp](https://github.com/httptoolkit/mockttp), [cloakbrowser](https://cloakbrowser.dev/), and [camoufox](https://github.com/daijro/camoufox).
+74 tools + 8 resources + 3 resource templates. Built on [mockttp](https://github.com/httptoolkit/mockttp), [cloakbrowser](https://cloakbrowser.dev/), and [Camoufox](https://camoufox.com/).
 
 ## Table of Contents
 
 - [Setup](#setup)
 - [HTTP Proxy Configuration](#http-proxy-configuration)
-- [Boundaries](#boundaries)
-- [TLS ClientHello Passthrough](#tls-clienthello-passthrough-chrome-via-interceptor)
-- [Pairs well with CDP/Playwright](#pairs-well-with-cdpplaywright)
 - [Mobile Capture (Transparent Proxy)](#mobile-capture-transparent-proxy)
+- [Boundaries](#boundaries)
+  - [TLS ClientHello Passthrough](#tls-clienthello-passthrough-browser-via-interceptor)
 - [Tools Reference](#tools-reference)
   - [Lifecycle](#lifecycle-4)
   - [Upstream Proxy](#upstream-proxy-4)
@@ -20,8 +19,8 @@ proxy-mcp is an MCP server that runs an explicit HTTP/HTTPS MITM proxy (L7). It 
   - [Modification Shortcuts](#modification-shortcuts-3)
   - [TLS Fingerprinting](#tls-fingerprinting-9)
   - [Interceptors](#interceptors-21)
-  - [Browser DevTools-equivalents](#browser-devtools-equivalents-9)
-  - [Sessions](#sessions-13)
+  - [Browser DevTools-equivalents](#browser-devtools-equivalents-12)
+  - [Sessions](#sessions-14)
   - [Humanizer](#humanizer--playwright-input-5)
 - [Resources](#resources)
 - [Usage Example](#usage-example)
@@ -51,7 +50,7 @@ claude mcp add --scope project proxy-mcp -- npx -y proxy-mcp@latest
 
 ### Prerequisites
 
-- Node.js 22+
+- Node.js 20+
 
 ### From source (development)
 
@@ -74,6 +73,8 @@ node dist/index.js --transport http --port 3001
 
 ### Manual MCP configuration
 
+The configured server alias controls Claude's generated tool prefix. The examples below use `proxy-mcp`, so Claude Code exposes tools as `mcp__proxy-mcp__<tool_name>`. If you rename the server key to `proxy`, use `mcp__proxy__<tool_name>` instead.
+
 **Claude Code CLI:**
 
 ```bash
@@ -92,7 +93,7 @@ claude mcp add --transport http proxy-mcp http://127.0.0.1:3001/mcp
 ```json
 {
   "mcpServers": {
-    "proxy": {
+    "proxy-mcp": {
       "command": "npx",
       "args": ["-y", "proxy-mcp@latest"]
     }
@@ -105,7 +106,7 @@ claude mcp add --transport http proxy-mcp http://127.0.0.1:3001/mcp
 ```json
 {
   "mcpServers": {
-    "proxy": {
+    "proxy-mcp": {
       "type": "streamable-http",
       "url": "http://127.0.0.1:3001/mcp"
     }
@@ -453,9 +454,9 @@ proxy_list_tls_fingerprints --hostname_filter "example.com"
 | Non-browser clients (curl, Python, `interceptor_spawn`) | Proxy's own TLS | `proxy_set_fingerprint_spoof` or `proxy_set_ja3_spoof` required |
 | HAR replay (`proxy_replay_session`) | Proxy's own TLS | `proxy_set_fingerprint_spoof` required |
 
-### Built on cloakbrowser + Playwright
+### Built on stealth browsers + Playwright
 
-Browser automation uses [cloakbrowser](https://cloakbrowser.dev/) — a stealth-patched Chromium with source-level C++ fingerprint patches — driven via Playwright. There is no CDP surface, no sidecar, no hand-rolled stealth script. One `target_id` from `interceptor_browser_launch` is everything downstream tools need.
+Browser automation uses [cloakbrowser](https://cloakbrowser.dev/) for stealth-patched Chromium and [Camoufox](https://camoufox.com/) for anti-detect Firefox, both driven through Playwright. There is no CDP sidecar or hand-rolled stealth script in proxy-mcp. Downstream tools take a `browser_*` target from `interceptor_browser_launch` or a `camoufox_*` target from `interceptor_camoufox_launch`.
 
 | Capability | proxy-mcp |
 |---|---|
@@ -467,14 +468,14 @@ Browser automation uses [cloakbrowser](https://cloakbrowser.dev/) — a stealth-
 | TLS fingerprint capture (JA3/JA4/JA3S) | Yes |
 | JA3 + HTTP/2 fingerprint spoofing | Proxy-side (impit re-issues matching requests with spoofed TLS 1.3, HTTP/2 frames, and header order) |
 | Intercept non-browser traffic (curl, Python, Android apps) | Yes (interceptors) |
-| Human-like mouse/keyboard/scroll input | `humanizer_*` tools: Bezier curves + Fitts's law for mouse, WPM + bigram + typo model for typing, eased wheel scroll — layered on top of cloakbrowser's built-in humanize mode |
+| Human-like mouse/keyboard/scroll input | `humanizer_*` tools call Playwright mouse/keyboard primitives on `browser_*` and `camoufox_*` targets. Cloakbrowser's own humanize patches apply when enabled at launch; Camoufox cursor humanization follows its launch config. |
 | Locator-based interaction | `humanizer_click` accepts CSS/XPath selector, ARIA role + name, visible text, or form label — no pixel guessing |
 
 **Standard flow:**
 
 1. Call `proxy_start`
 2. Optionally enable outbound fingerprint spoofing for cross-origin sub-resources: `proxy_set_fingerprint_spoof --preset chrome_136`
-3. Call `interceptor_browser_launch --url "https://example.com"`
+3. Call `interceptor_browser_launch --url "https://example.com"` or `interceptor_camoufox_launch`
 4. Drive the page: `interceptor_browser_navigate`, `interceptor_browser_snapshot`, `humanizer_click --selector "..."`, `humanizer_type --text "..."`
 5. Inspect traffic: `proxy_search_traffic --query "<hostname>"`
 
@@ -597,6 +598,8 @@ Stealth is source-level: cloakbrowser ships 48+ C++ patches so ja3n/ja4/akamai m
 
 Camoufox is a patched Firefox with source-level fingerprint controls (OS, WebGL vendor/renderer, fonts, locale, geoip-derived timezone, WebRTC blocking, humanize cursor). Camoufox runs as an external Python process and exposes a Playwright WS endpoint, but proxy-mcp also binds the returned `camoufox_*` target to the same `interceptor_browser_*` and `humanizer_*` tools used by cloakbrowser. Use the exposed `wsUrl` only when you need custom Playwright code outside MCP.
 
+By default, proxy-mcp sets Camoufox fingerprint generation to the host OS (`linux`, `macos`, or `windows`) instead of Camoufox's upstream random OS list. Override with `os` when you intentionally need a different family, or pass an array such as `["windows", "macos"]` to let Camoufox choose from that subset. Launch/list/info responses include a safe `fingerprint` summary with the resolved OS, User-Agent, platform, OSCPU, screen/window dimensions, WebGL vendor/renderer, and font/voice counts; raw Camoufox config and process environment are not exposed.
+
 **Host requirements:**
 
 ```bash
@@ -615,7 +618,7 @@ If `certutil` is missing, the launch still succeeds but the proxy CA is not trus
 
 ```text
 proxy_start                                     // start the MITM proxy
-interceptor_camoufox_launch { headless: true }  // returns { targetId, wsUrl, playwright_connect, ... }
+interceptor_camoufox_launch { headless: true }  // returns { targetId, wsUrl, fingerprint, ... }
 interceptor_browser_navigate --target_id "camoufox_<id>" --url "https://example.com"
 interceptor_browser_snapshot --target_id "camoufox_<id>" --mode ai
 interceptor_browser_list_console --target_id "camoufox_<id>"
@@ -684,7 +687,7 @@ Playwright-driven tools for the browser target. Each takes a `target_id` directl
 | `interceptor_browser_get_storage_value` | Get one storage value by `item_id` |
 | `interceptor_browser_list_network_fields` | Header field listing from proxy-captured traffic since the browser was launched |
 | `interceptor_browser_get_network_field` | Get one full header field value by `field_id` |
-| `interceptor_browser_evaluate` | Run a JS file in the page (file body wrapped as `(__args) => { ... }`); returns the result. `world: "isolated"` (default) or `world: "main"` (camoufox-only, requires `main_world_eval: true` at launch). On current camoufox build (cloverlabs/FF150) both args run in page main world — mutations are page-visible |
+| `interceptor_browser_evaluate` | Run a JS file in the page (file body wrapped as `(__args) => { ... }`); returns the result. `world: "isolated"` is the default. `world: "main"` is camoufox-only and requires `main_world_eval: true` at launch. On current camoufox build (cloverlabs/FF150) both permitted modes run in the page main world — mutations are page-visible |
 | `interceptor_browser_inject_init_script` | Inject a JS file as `page.addInitScript` — runs before every page script on the next navigation. Cloakbrowser: isolated utility world. Camoufox (cloverlabs/FF150): page main world directly — patches reach the page but are observable by page scripts (`Function.prototype.toString` leak applies) |
 | `interceptor_browser_add_script_tag` | Append a `<script>` to the current page. **DOM-visible — avoid for stealth.** Use for benign payloads where main-world execution + page visibility is intentional |
 
@@ -695,7 +698,7 @@ Network data is sourced from the MITM proxy rather than a browser-side protocol 
 | Method | Cloakbrowser | Camoufox (cloverlabs/FF150) |
 |---|---|---|
 | `evaluate` isolated | Safe (isolated utility world) — rate-limit before reCAPTCHA, each call is CDP traffic | Runs in page main world; reads are invisible, mutations are page-observable |
-| `evaluate` main | Not supported by Playwright API | Same realm as `isolated` on this build (`mw:` prefix is a no-op) |
+| `evaluate` main | Not supported by Playwright API | Requires `main_world_eval: true` at launch; same realm as `isolated` on this build once enabled (`mw:` prefix does not create a distinct realm) |
 | `inject_init_script` | **Best for stealth** — pre-document, no DOM artifact | Patches reach the page (good) but are observable via `Function.prototype.toString` and `window` enumeration; not stealth-safe for high-tier WAFs |
 | `add_script_tag` | Detectable (DOM node, MutationObserver, CSP) | Detectable (same) |
 
@@ -711,7 +714,7 @@ The two backends ship different world models. Picking the wrong tool is the most
 
 - `inject_init_script` patches reach the page (e.g. `Object.defineProperty(navigator, 'webdriver', ...)` does affect what site scripts see). The DOWNSIDE: the patch is observable to anti-bot code on the page — `Function.prototype.toString.toString()` reveals replaced functions, `Object.defineProperty` hooks see the call.
 - `interceptor_browser_evaluate` reads are invisible (no `window` writes, no prototype changes). Mutating evals (`() => { window.x = 1 }`) are observable.
-- `world: "isolated"` and `world: "main"` accept the same args for API compatibility but run in the same realm. The `mw:` prefix and `main_world_eval: true` launch flag are accepted for backward-compat but have no observable effect on this build.
+- `world: "isolated"` and `world: "main"` accept the same script args for API compatibility but run in the same realm once `main` is enabled. `main_world_eval: true` still gates explicit `world: "main"` calls in proxy-mcp; on this build it does not create a separate execution realm.
 
 Verify behavior on your installed build:
 
@@ -732,7 +735,7 @@ npx tsx scripts/camoufox-world-probe.ts --venv=/path/to/camoufox-venv
 
 **Stealth note**: on the current camoufox build, every JS-level mutation from automation is observable by anti-bot code on the page. Prefer source-level configuration over runtime patching. Use `evaluate` for reads, not writes, when stealth matters.
 
-### Sessions (13)
+### Sessions (14)
 
 Persistent, queryable on-disk capture for long runs and post-crash analysis.
 
@@ -745,6 +748,7 @@ Persistent, queryable on-disk capture for long runs and post-crash analysis.
 | `proxy_list_sessions` | List recorded sessions from disk |
 | `proxy_get_session` | Get manifest/details for one session |
 | `proxy_query_session` | Indexed query over recorded exchanges |
+| `proxy_search_session_bodies` | Search request/response bodies stored in a persistent session, with context snippets |
 | `proxy_get_session_handshakes` | Report JA3/JA4/JA3S handshake metadata availability for session entries |
 | `proxy_get_session_exchange` | Fetch one exchange from a session (with optional full bodies) |
 | `proxy_replay_session` | Dry-run or execute replay of selected session requests |
@@ -758,22 +762,22 @@ Note on `proxy_start` with `persistence_enabled: true`: this auto-creates a sess
 
 ### Humanizer — Playwright Input (5)
 
-Human-like browser input via Playwright `page.mouse` / `page.keyboard`, layered on top of cloakbrowser's built-in humanize mode. Binds to `target_id` from `interceptor_browser_launch`.
+Human-like browser input via Playwright `page.mouse` / `page.keyboard`. Works with `browser_*` targets from `interceptor_browser_launch` and `camoufox_*` targets from `interceptor_camoufox_launch`. Cloakbrowser's own humanize patches apply when enabled at launch; Camoufox cursor humanization follows the Camoufox launch config.
 
 | Tool | Description |
 |------|-------------|
-| `humanizer_move` | Move mouse along a Bezier curve with Fitts's law velocity scaling and eased timing |
+| `humanizer_move` | Move the mouse to `x,y` through the backend Playwright page |
 | `humanizer_click` | Click a locator (`selector` / `role` + `name` / `text` / `label`) or raw `x,y`. Auto-waits for visible + enabled + stable + in-view before clicking |
-| `humanizer_type` | Type text with per-character delays modeled on WPM, bigram frequency, shift penalty, word pauses, and optional typo injection |
-| `humanizer_scroll` | Scroll with easeInOutQuad acceleration/deceleration via multiple wheel events |
+| `humanizer_type` | Type text into the focused element via `page.keyboard.type`; optional `delay_ms` passes through to Playwright |
+| `humanizer_scroll` | Dispatch one Playwright `page.mouse.wheel` event |
 | `humanizer_idle` | Simulate idle behavior with mouse micro-jitter and occasional micro-scrolls to defeat idle detection |
 
-All tools require `target_id` from a prior `interceptor_browser_launch`. The engine maintains tracked mouse position across calls, so `humanizer_move` followed by `humanizer_click` produces a continuous path.
+All tools require `target_id` from a prior `interceptor_browser_launch` or `interceptor_camoufox_launch`. The engine maintains tracked mouse position across calls for coordinate-based move/click/idle behavior.
 
 **Behavioral details:**
-- **Mouse paths**: Cubic Bezier curves with random control points, Fitts's law distance/size scaling, optional overshoot + correction arc
-- **Typing**: Base delay from WPM, modified by bigram frequency (common pairs like "th" are faster), shift key penalty, word-boundary pauses. Optional typo injection uses QWERTY neighbor map with backspace correction
-- **Scrolling**: Total delta distributed across multiple wheel events following easeInOutQuad velocity curve
+- **Mouse**: `humanizer_move` calls `page.mouse.move`; locator clicks call Playwright locators and raw-coordinate clicks call `page.mouse.click`
+- **Typing**: `humanizer_type` calls `page.keyboard.type(text, { delay })` when `delay_ms` is provided; no WPM, typo, or bigram model is implemented in proxy-mcp
+- **Scrolling**: `humanizer_scroll` sends one wheel event with the requested delta
 - **Idle**: Periodic micro-jitter (±3px subtle / ±8px normal) and random micro-scrolls at configurable intensity
 
 ## Resources
@@ -828,11 +832,11 @@ proxy_set_ja3_spoof --ja3 "771,4865-..."   # Spoof outgoing JA3 (for non-browser
 proxy_set_fingerprint_spoof --preset chrome_136 --host_patterns '["example.com"]'  # Full fingerprint spoof
 proxy_list_fingerprint_presets                  # Available browser presets
 
-# Human-like browser interaction (requires interceptor_browser_launch target)
+# Human-like browser interaction (browser_* or camoufox_* target)
 humanizer_move   --target_id "browser_<id>" --x 500 --y 300
 humanizer_click  --target_id "browser_<id>" --selector "#login-button"
 humanizer_click  --target_id "browser_<id>" --role "button" --name "Sign in"
-humanizer_type   --target_id "browser_<id>" --text "user@example.com" --wpm 45
+humanizer_type   --target_id "browser_<id>" --text "user@example.com" --delay_ms 45
 humanizer_scroll --target_id "browser_<id>" --delta_y 300
 humanizer_idle   --target_id "browser_<id>" --duration_ms 2000 --intensity subtle
 
@@ -857,8 +861,8 @@ proxy_export_har --session_id SESSION_ID
 - **TLS capture**: Client JA3/JA4 from mockttp socket metadata; server JA3S via `tls.connect` monkey-patch
 - **TLS spoofing**: impit (native Rust TLS/HTTP2 impersonation via rustls); in-process, no container needed
 - **Interceptors**: Managed by `InterceptorManager`, each type registers independently
-- **Browser**: cloakbrowser (stealth Chromium, ~200 MB binary auto-downloaded on first launch) driven via Playwright `BrowserContext` / `Page`
-- **Humanizer**: Singleton engine using Playwright's `page.mouse` / `page.keyboard`. Custom timing layer (Bezier paths, Fitts's law, bigram typing) feeds Playwright — sits on top of cloakbrowser's built-in `humanize: true`
+- **Browser**: cloakbrowser (stealth Chromium, ~200 MB binary auto-downloaded on first launch) and Camoufox (anti-detect Firefox, installed separately) driven via Playwright `BrowserContext` / `Page`
+- **Humanizer**: Singleton engine using Playwright's `page.mouse` / `page.keyboard`, plus local mouse-position tracking for idle jitter
 
 ## Testing
 
@@ -879,7 +883,8 @@ npm run test:e2e      # E2E fingerprint tests (requires cloakbrowser + internet)
 | [impit](https://github.com/yfe404/impit) | Native TLS/HTTP2 fingerprint impersonation (Rust via NAPI-RS) |
 | [frida-js](https://github.com/AeonLucid/frida-js) | Pure-JS Frida client for Android instrumentation |
 | [cloakbrowser](https://cloakbrowser.dev/) | Stealth-patched Chromium with source-level C++ fingerprint patches |
-| [playwright-core](https://playwright.dev/) | Browser automation API driving cloakbrowser |
+| [Camoufox](https://camoufox.com/) | Anti-detect Firefox backend with source-level fingerprint controls |
+| [playwright-core](https://playwright.dev/) | Browser automation API driving cloakbrowser and Camoufox |
 | [@modelcontextprotocol/sdk](https://github.com/modelcontextprotocol/typescript-sdk) | MCP server framework |
 
 ### Vendored Frida Scripts

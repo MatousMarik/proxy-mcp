@@ -1,9 +1,10 @@
 /**
- * Humanizer MCP tools — thin wrappers over cloakbrowser-patched Playwright.
+ * Humanizer MCP tools — thin wrappers over backend Playwright pages.
  *
- * cloakbrowser's `humanize: true` (on by default) already provides Bezier
- * mouse paths, realistic typing with CDP-trusted Shift handling, and smooth
- * scrolling. These tools just expose the patched methods to MCP callers.
+ * cloakbrowser targets may apply cloakbrowser's own humanize patches when
+ * launched with humanize enabled. Camoufox targets follow Camoufox's launch
+ * config. proxy-mcp itself calls Playwright primitives and tracks mouse
+ * position for idle jitter.
  */
 
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -21,10 +22,9 @@ export function registerHumanizerTools(server: McpServer): void {
 
   server.tool(
     "humanizer_move",
-    "Move mouse to target coordinates. cloakbrowser's humanize patches " +
-    "page.mouse.move with a Bezier-curved path.",
+    "Move mouse to target coordinates via the backend Playwright page.",
     {
-      target_id: z.string().describe("Browser target ID from interceptor_browser_launch"),
+      target_id: z.string().describe("Target ID from interceptor_browser_launch or interceptor_camoufox_launch"),
       x: z.number().describe("Destination X coordinate"),
       y: z.number().describe("Destination Y coordinate"),
     },
@@ -54,10 +54,9 @@ export function registerHumanizerTools(server: McpServer): void {
   server.tool(
     "humanizer_click",
     "Click an element. Pass one of: selector (CSS/XPath), role + optional name, " +
-    "text, label, or raw x+y coords as fallback. cloakbrowser's humanize handles " +
-    "the Bezier path and click timing; locator-based calls auto-wait for visible.",
+    "text, label, or raw x+y coords as fallback. Locator-based calls auto-wait for visible.",
     {
-      target_id: z.string().describe("Browser target ID from interceptor_browser_launch"),
+      target_id: z.string().describe("Target ID from interceptor_browser_launch or interceptor_camoufox_launch"),
       selector: z.string().optional().describe("CSS or XPath selector (e.g. 'button.submit', '//button[@id=\"go\"]')"),
       role: z.string().optional().describe("ARIA role (e.g. 'button', 'link', 'textbox')"),
       name: z.string().optional().describe("Accessible name; used with role (e.g. 'Sign in')"),
@@ -111,14 +110,12 @@ export function registerHumanizerTools(server: McpServer): void {
 
   server.tool(
     "humanizer_type",
-    "Type text into the focused element. cloakbrowser's humanize patches " +
-    "page.keyboard.type with realistic per-char timing and CDP-trusted Shift " +
-    "handling (uppercase + symbols preserved).",
+    "Type text into the focused element via page.keyboard.type.",
     {
-      target_id: z.string().describe("Browser target ID from interceptor_browser_launch"),
+      target_id: z.string().describe("Target ID from interceptor_browser_launch or interceptor_camoufox_launch"),
       text: z.string().describe("Text to type"),
       delay_ms: z.number().optional()
-        .describe("Extra delay per character in ms. Omit to let cloakbrowser pick its own humanized cadence."),
+        .describe("Optional Playwright delay per character in ms."),
     },
     async ({ target_id, text, delay_ms }) => {
       try {
@@ -151,7 +148,7 @@ export function registerHumanizerTools(server: McpServer): void {
     "humanizer_scroll",
     "Dispatch a wheel event. Raw page.mouse.wheel — single event, not multi-step.",
     {
-      target_id: z.string().describe("Browser target ID from interceptor_browser_launch"),
+      target_id: z.string().describe("Target ID from interceptor_browser_launch or interceptor_camoufox_launch"),
       delta_y: z.number().describe("Vertical scroll delta in pixels (positive = scroll down)"),
       delta_x: z.number().optional().default(0)
         .describe("Horizontal scroll delta in pixels (default: 0)"),
@@ -184,7 +181,7 @@ export function registerHumanizerTools(server: McpServer): void {
     "Simulate idle behavior with mouse micro-jitter and occasional micro-scrolls. " +
     "Keeps the page 'alive' to avoid idle detection by bot-detection scripts.",
     {
-      target_id: z.string().describe("Browser target ID from interceptor_browser_launch"),
+      target_id: z.string().describe("Target ID from interceptor_browser_launch or interceptor_camoufox_launch"),
       duration_ms: z.number().describe("How long to simulate idle behavior in ms"),
       intensity: z.enum(["subtle", "normal"]).optional().default("subtle")
         .describe("Idle intensity: 'subtle' (±3px jitter) or 'normal' (±8px jitter, more scrolls)"),

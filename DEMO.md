@@ -28,8 +28,9 @@ explain what *would* have happened and return to the menu. Never stop the demo o
 a failure. First `interceptor_browser_launch` call may take 30–60 s while the
 ~200 MB stealth Chromium binary downloads.
 
-**Tool prefix:** All tools are from the `proxy` MCP server — call them as
-`mcp__proxy__<tool_name>`.
+**Tool prefix:** All tools are from this MCP server. If configured with the
+README's `proxy-mcp` alias, call them as `mcp__proxy-mcp__<tool_name>`. If the
+local client aliases the server as `proxy`, call them as `mcp__proxy__<tool_name>`.
 
 ---
 

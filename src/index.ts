@@ -55,7 +55,7 @@ function arg(name: string, fallback: string): string {
 /* ------------------------------------------------------------------ */
 
 function createMcpServer(): McpServer {
-  const server = new McpServer({ name: "proxy", version: "3.3.1" });
+  const server = new McpServer({ name: "proxy", version: "3.3.2" });
 
   initInterceptors();
 

@@ -31,6 +31,8 @@ import type {
   Interceptor, InterceptorMetadata, ActivateOptions, ActivateResult, ActiveTarget,
 } from "./types.js";
 
+type CamoufoxOs = "windows" | "macos" | "linux";
+
 export interface CamoufoxTargetEntry {
   target: ActiveTarget;
   process: ChildProcess;
@@ -47,6 +49,55 @@ const FORWARDED_PARAMS = [
 ] as const;
 
 type CamoufoxParam = (typeof FORWARDED_PARAMS)[number];
+
+interface CamoufoxFingerprintSummary {
+  os?: CamoufoxOs;
+  requested_os?: unknown;
+  os_source?: "caller" | "host_default" | "resolved";
+  user_agent?: string;
+  platform?: string;
+  oscpu?: string;
+  app_version?: string;
+  locale?: unknown;
+  accept_language?: string;
+  timezone?: string;
+  screen?: Record<string, unknown>;
+  window?: Record<string, unknown>;
+  webgl?: Record<string, unknown>;
+  fonts_count?: number;
+  voices_count?: number;
+}
+
+interface WsHandshake {
+  wsUrl: string;
+  ts: number;
+  fingerprint?: CamoufoxFingerprintSummary;
+}
+
+export function hostFingerprintOs(platform: NodeJS.Platform = process.platform): CamoufoxOs | undefined {
+  if (platform === "win32") return "windows";
+  if (platform === "darwin") return "macos";
+  if (platform === "linux") return "linux";
+  return undefined;
+}
+
+function firstString(value: unknown): string | undefined {
+  return typeof value === "string" && value ? value : undefined;
+}
+
+function inferOsFromFingerprint(fingerprint: CamoufoxFingerprintSummary | undefined): CamoufoxOs | undefined {
+  if (fingerprint?.os) return fingerprint.os;
+  const haystack = [
+    fingerprint?.user_agent,
+    fingerprint?.platform,
+    fingerprint?.oscpu,
+    fingerprint?.app_version,
+  ].filter(Boolean).join(" ").toLowerCase();
+  if (haystack.includes("windows") || haystack.includes("win32")) return "windows";
+  if (haystack.includes("macintosh") || haystack.includes("mac os") || haystack.includes("macintel")) return "macos";
+  if (haystack.includes("linux") || haystack.includes("x11")) return "linux";
+  return undefined;
+}
 
 export class CamoufoxInterceptor implements Interceptor {
   readonly id = "camoufox";
@@ -84,12 +135,17 @@ export class CamoufoxInterceptor implements Interceptor {
     const pythonExe = typeof options.python_executable === "string" && options.python_executable
       ? options.python_executable
       : "python3";
+    const requestedOs = options.os;
+    const defaultOs = requestedOs === undefined ? hostFingerprintOs() : undefined;
+    const osForLaunch = requestedOs ?? defaultOs;
+    const osSource = requestedOs === undefined ? "host_default" : "caller";
 
     const params: Record<string, unknown> = {
       proxy: { server: `http://127.0.0.1:${proxyPort}` },
       headless,
       block_webrtc: blockWebrtc,
       geoip,
+      ...(osForLaunch !== undefined ? { os: osForLaunch } : {}),
     };
 
     for (const key of FORWARDED_PARAMS as readonly CamoufoxParam[]) {
@@ -143,9 +199,9 @@ export class CamoufoxInterceptor implements Interceptor {
       },
     });
 
-    let wsUrl: string;
+    let handshake: WsHandshake;
     try {
-      wsUrl = await awaitWsEndpoint(proc, wsEndpointFile, DEFAULT_LAUNCH_TIMEOUT_MS);
+      handshake = await awaitWsHandshake(proc, wsEndpointFile, DEFAULT_LAUNCH_TIMEOUT_MS);
     } catch (e) {
       try { proc.kill("SIGKILL"); } catch { /* already gone */ }
       await rm(launcherDir, { recursive: true, force: true }).catch(() => {});
@@ -155,20 +211,30 @@ export class CamoufoxInterceptor implements Interceptor {
 
     const pid = typeof proc.pid === "number" ? proc.pid : 0;
     const targetId = `camoufox_${pid}_${Date.now()}`;
+    const fingerprint: CamoufoxFingerprintSummary = {
+      ...(handshake.fingerprint ?? {}),
+      requested_os: requestedOs ?? null,
+      os_source: osSource,
+    };
+    const effectiveOs = inferOsFromFingerprint(fingerprint) ?? firstString(osForLaunch) ?? null;
+    if (effectiveOs) fingerprint.os = effectiveOs as CamoufoxOs;
 
     const details: Record<string, unknown> = {
-      wsUrl,
+      wsUrl: handshake.wsUrl,
       proxyPort,
       headless,
       humanize: options.humanize ?? null,
       geoip,
       block_webrtc: blockWebrtc,
       main_world_eval: Boolean(params.main_world_eval),
-      ...(options.os !== undefined ? { os: options.os } : {}),
+      os: effectiveOs,
+      requested_os: requestedOs ?? null,
+      default_os: defaultOs ?? null,
+      fingerprint,
       ...(options.locale !== undefined ? { locale: options.locale } : {}),
       profileDir,
       certutil: profileDir !== null,
-      playwright_connect: `await firefox.connect('${wsUrl}')`,
+      playwright_connect: `await firefox.connect('${handshake.wsUrl}')`,
     };
 
     const target: ActiveTarget = {
@@ -178,7 +244,7 @@ export class CamoufoxInterceptor implements Interceptor {
       details,
     };
 
-    const entry: CamoufoxTargetEntry = { target, process: proc, wsUrl, profileDir, launcherDir };
+    const entry: CamoufoxTargetEntry = { target, process: proc, wsUrl: handshake.wsUrl, profileDir, launcherDir };
     this.launched.set(targetId, entry);
 
     proc.once("exit", () => {
@@ -236,6 +302,7 @@ export class CamoufoxInterceptor implements Interceptor {
       name: this.name,
       description:
         "Launch camoufox (anti-detect Firefox) as a Playwright WS server with proxy + NSS CA trust. " +
+        "Defaults fingerprint generation to the host OS and returns safe fingerprint introspection. " +
         "Drive the returned target_id through the same `interceptor_browser_*` and `humanizer_*` " +
         "tools as cloakbrowser. Requires Python + `pip install cloverlabs-camoufox[geoip]`.",
       isActivable: await this.isActivable(),
@@ -326,6 +393,67 @@ export function buildLauncherScript(
     "",
     `params = json.loads('${escapedParams}')`,
     "config = launch_options(**params)",
+    "",
+    "def _pick(src, key):",
+    "    return src.get(key) if isinstance(src, dict) and key in src else None",
+    "",
+    "def _count_list(value):",
+    "    return len(value) if isinstance(value, list) else None",
+    "",
+    "def _infer_os(cam):",
+    "    haystack = ' '.join(str(x or '') for x in [",
+    "        _pick(cam, 'navigator.userAgent'),",
+    "        _pick(cam, 'navigator.platform'),",
+    "        _pick(cam, 'navigator.oscpu'),",
+    "        _pick(cam, 'navigator.appVersion'),",
+    "    ]).lower()",
+    "    if 'windows' in haystack or 'win32' in haystack:",
+    "        return 'windows'",
+    "    if 'macintosh' in haystack or 'mac os' in haystack or 'macintel' in haystack:",
+    "        return 'macos'",
+    "    if 'linux' in haystack or 'x11' in haystack:",
+    "        return 'linux'",
+    "    return None",
+    "",
+    "def _fingerprint_summary(config):",
+    "    env = config.get('env') if isinstance(config, dict) else {}",
+    "    raw = env.get('CAMOU_CONFIG_1') if isinstance(env, dict) else None",
+    "    if not raw:",
+    "        return None",
+    "    try:",
+    "        cam = json.loads(raw)",
+    "    except Exception:",
+    "        return None",
+    "    return {",
+    "        'os': _infer_os(cam),",
+    "        'user_agent': _pick(cam, 'navigator.userAgent'),",
+    "        'platform': _pick(cam, 'navigator.platform'),",
+    "        'oscpu': _pick(cam, 'navigator.oscpu'),",
+    "        'app_version': _pick(cam, 'navigator.appVersion'),",
+    "        'locale': _pick(cam, 'locale:language') or _pick(cam, 'headers.Accept-Language'),",
+    "        'accept_language': _pick(cam, 'headers.Accept-Language'),",
+    "        'timezone': _pick(cam, 'timezone'),",
+    "        'screen': {",
+    "            'width': _pick(cam, 'screen.width'),",
+    "            'height': _pick(cam, 'screen.height'),",
+    "            'avail_width': _pick(cam, 'screen.availWidth'),",
+    "            'avail_height': _pick(cam, 'screen.availHeight'),",
+    "            'color_depth': _pick(cam, 'screen.colorDepth'),",
+    "            'pixel_depth': _pick(cam, 'screen.pixelDepth'),",
+    "        },",
+    "        'window': {",
+    "            'outer_width': _pick(cam, 'window.outerWidth'),",
+    "            'outer_height': _pick(cam, 'window.outerHeight'),",
+    "        },",
+    "        'webgl': {",
+    "            'vendor': _pick(cam, 'webGl:vendor'),",
+    "            'renderer': _pick(cam, 'webGl:renderer'),",
+    "        },",
+    "        'fonts_count': _count_list(_pick(cam, 'fonts')),",
+    "        'voices_count': _count_list(_pick(cam, 'voices')),",
+    "    }",
+    "",
+    "fingerprint_summary = _fingerprint_summary(config)",
     "nodejs = get_nodejs()",
     "data = orjson.dumps(to_camel_case_dict(config))",
     "",
@@ -355,7 +483,7 @@ export function buildLauncherScript(
     "        m = _WS_RE.search(_ANSI.sub('', line))",
     "        if m:",
     "            _ws_done = True",
-    "            payload = json.dumps({'wsUrl': m.group(1), 'ts': int(time.time())})",
+    "            payload = json.dumps({'wsUrl': m.group(1), 'ts': int(time.time()), 'fingerprint': fingerprint_summary})",
     "            d = os.path.dirname(_WS_FILE) or '.'",
     "            fd, tmp = tempfile.mkstemp(prefix='.ws-', dir=d)",
     "            with os.fdopen(fd, 'w') as f:",
@@ -368,11 +496,6 @@ export function buildLauncherScript(
   ].join("\n");
 }
 
-interface WsHandshake {
-  wsUrl: string;
-  ts: number;
-}
-
 /**
  * Poll `wsEndpointFile` until the python wrapper writes the handshake
  * JSON, or `proc` exits, or the timeout fires — whichever happens first.
@@ -383,11 +506,20 @@ interface WsHandshake {
  * wrapper's problem (it can update its own regex), and Node only
  * reads a structured file.
  */
-export function awaitWsEndpoint(
+export async function awaitWsEndpoint(
   proc: ChildProcess,
   wsEndpointFile: string,
   timeoutMs: number,
 ): Promise<string> {
+  const handshake = await awaitWsHandshake(proc, wsEndpointFile, timeoutMs);
+  return handshake.wsUrl;
+}
+
+export function awaitWsHandshake(
+  proc: ChildProcess,
+  wsEndpointFile: string,
+  timeoutMs: number,
+): Promise<WsHandshake> {
   return new Promise((resolve, reject) => {
     let settled = false;
     let stderrTail = "";
@@ -438,7 +570,7 @@ export function awaitWsEndpoint(
         if (typeof handshake.wsUrl === "string" && handshake.wsUrl.startsWith("ws://")) {
           settled = true;
           cleanup();
-          resolve(handshake.wsUrl);
+          resolve(handshake);
           return;
         }
         // File present but malformed — keep polling; the python wrapper

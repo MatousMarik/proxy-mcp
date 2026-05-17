@@ -1,10 +1,10 @@
 /**
- * Humanizer engine — thin wrappers over cloakbrowser-patched Playwright.
+ * Humanizer engine — thin wrappers over backend Playwright pages.
  *
- * cloakbrowser's `humanize: true` already patches page.click / page.mouse.move /
- * page.mouse.click / page.keyboard.type / page.hover / page.type with Bezier
- * paths, realistic typing, and CDP-trusted Shift handling. This engine just
- * routes tool calls to those patched methods — no duplicate timing code.
+ * The engine routes tool calls to page.mouse / page.keyboard / locator methods.
+ * Backend-level humanization comes from the launched browser config
+ * (cloakbrowser humanize patches or Camoufox options), not from a local timing
+ * model in proxy-mcp.
  */
 
 import type { Page, Locator } from "playwright-core";
