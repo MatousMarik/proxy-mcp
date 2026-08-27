@@ -185,6 +185,39 @@ proxy_set_upstream --proxy_url "socks5://user:pass@upstream.example:1080"
 
 Supported upstream URL schemes: `socks4://`, `socks5://`, `http://`, `https://`, `pac+http://`.
 
+#### Keeping the upstream password out of the transcript
+
+Tool calls and tool results are both persisted by the MCP client. To avoid
+writing an upstream password there on every call, set it in the server's
+environment and pass a URL with a username but no password:
+
+```bash
+export PROXY_MCP_UPSTREAM_PASSWORD="s3cret"
+
+proxy_set_upstream --proxy_url "http://user@upstream.example:1080"
+# routes as http://user:s3cret@upstream.example:1080
+```
+
+Applies to `proxy_set_upstream`, `proxy_set_host_upstream` and
+`proxy_mobile_setup`. A URL that already carries a password is used as-is, so
+existing calls are unaffected. One credential covers all upstreams; a URL
+without a username is left alone.
+
+Responses redact credentials — the password in userinfo, and query values,
+which is where a `pac+http://` token normally lives:
+
+```
+Global upstream set to http://user:***@upstream.example:1080/
+```
+
+`proxy_status` and the `proxy://status` resource are redacted the same way.
+
+**The username is not redacted.** For several providers it is configuration
+rather than a secret — Apify Proxy encodes proxy group, country and
+sticky-session id there — and showing it is what makes the confirmation useful.
+If your provider puts a secret in the username field, do not rely on these
+messages being safe to share.
+
 Typical geo-routing examples:
 
 ```bash
@@ -367,6 +400,9 @@ proxy_mobile_setup \
 ```
 
 Applies to BOTH listeners. Use `proxy_set_upstream` after the fact to change it without restarting.
+
+As with `proxy_set_upstream`, omit the password and set
+`PROXY_MCP_UPSTREAM_PASSWORD` in the environment to keep it out of the call.
 
 ### Verifying each step
 
