@@ -24,6 +24,7 @@ import { join } from "node:path";
 import { randomBytes } from "node:crypto";
 import { proxyManager } from "../state.js";
 import { interceptorManager } from "../interceptors/manager.js";
+import { mergeUpstreamPassword } from "../utils.js";
 
 function errorToString(e: unknown): string {
   if (e instanceof Error) return e.message;
@@ -198,7 +199,7 @@ export function registerMobileTools(server: McpServer): void {
       explicit_port: z.number().optional().default(8080).describe("Port for the explicit HTTP proxy (default: 8080)."),
       transparent_port: z.number().optional().default(8443).describe("Port for the transparent HTTPS listener (default: 8443)."),
       block_quic: z.boolean().optional().default(true).describe("Drop UDP/443 on the AP iface so apps fall back to TCP/TLS (capturable). Default: true."),
-      upstream_proxy_url: z.string().optional().describe("Optional upstream proxy URL (socks5://user:pass@host:port or http://...). Sets the global upstream for BOTH listeners."),
+      upstream_proxy_url: z.string().optional().describe("Optional upstream proxy URL (socks5://user:pass@host:port or http://...). Sets the global upstream for BOTH listeners. If it has a username but no password, the password is taken from PROXY_MCP_UPSTREAM_PASSWORD."),
       android_serial: z.string().optional().describe("ADB serial of an Android device to inject the CA on. If omitted, no cert injection is attempted."),
       inject_cert: z.boolean().optional().default(true).describe("Inject the CA into the Android device's system store. Ignored if android_serial is omitted."),
     },
@@ -215,6 +216,12 @@ export function registerMobileTools(server: McpServer): void {
       inject_cert,
     }) => {
       try {
+        // Resolve the upstream credential before starting anything: cheap, and
+        // keeps a bad value from leaving listeners running behind an error.
+        const resolvedUpstream = upstream_proxy_url
+          ? mergeUpstreamPassword(upstream_proxy_url)
+          : undefined;
+
         // 1. Resolve AP iface.
         let apIface = ap_iface;
         let ifaceReason = "user-provided";
@@ -255,7 +262,7 @@ export function registerMobileTools(server: McpServer): void {
         // 5. Upstream (optional).
         let upstreamSet = false;
         if (upstream_proxy_url) {
-          await proxyManager.setGlobalUpstream({ proxyUrl: upstream_proxy_url });
+          await proxyManager.setGlobalUpstream({ proxyUrl: resolvedUpstream! });
           upstreamSet = true;
         }
 
