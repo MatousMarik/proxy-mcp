@@ -85,13 +85,24 @@ export function capString(s: string, maxLen: number): string {
 }
 
 /**
- * Replace the password in a proxy URL with "***" for safe logging.
+ * Environment variable holding the upstream proxy password.
+ *
+ * One credential for all upstreams. Per-provider secrets would need
+ * PROXY_MCP_UPSTREAM_PASSWORD_<HOST> or similar; nothing needs that yet.
+ */
+const UPSTREAM_PASSWORD_ENV = "PROXY_MCP_UPSTREAM_PASSWORD";
+
+/**
+ * Replace credentials in a proxy URL with "***" for safe logging.
  *
  * Upstream proxy URLs carry credentials, and tool responses are persisted in
  * the MCP client transcript. The username is preserved on purpose: for some
  * providers it is configuration rather than a secret (Apify Proxy encodes
  * proxy group, country and sticky-session id there), and it is what makes a
- * confirmation message worth printing.
+ * confirmation message worth printing. See the README security section.
+ *
+ * Query values are redacted too: a pac+http:// URL normally carries its token
+ * in the query rather than in userinfo.
  */
 export function redactProxyUrl(proxyUrl: string): string {
   let url: URL;
@@ -100,53 +111,40 @@ export function redactProxyUrl(proxyUrl: string): string {
   } catch {
     return "<unparseable url>";
   }
-  if (!url.password) return proxyUrl;
-
-  // Splice the original string rather than re-serializing the URL, so the
-  // message shows exactly what was passed in (URL.toString() would append a
-  // trailing "/" to an authority-only http URL).
-  const marker = `:${url.password}@`;
-  const idx = proxyUrl.indexOf(marker);
-  if (idx !== -1) {
-    return `${proxyUrl.slice(0, idx)}:***@${proxyUrl.slice(idx + marker.length)}`;
+  if (url.password) url.password = "***";
+  for (const key of [...url.searchParams.keys()]) {
+    url.searchParams.set(key, "***");
   }
-  url.password = "***";
   return url.toString();
 }
 
 /**
- * Prefix a variable name must carry to be readable via ${...} expansion.
+ * Fill in the upstream password from the environment when the caller supplied
+ * a username but no password, so a credential need not appear in the tool call.
  *
- * Expansion lets a caller keep a credential out of the tool call, but it also
- * lets the caller read the server's environment. Namespacing keeps that
- * deliberate: an agent cannot reach ${AWS_SECRET_ACCESS_KEY} and forward it to
- * a host of its choosing as Proxy-Authorization.
- */
-const ENV_PREFIX = "PROXY_MCP_";
-
-/**
- * Expand ${PROXY_MCP_*} placeholders in an upstream proxy URL from the
- * environment, so credentials need not appear in the tool call.
+ * The value can only ever land in the password slot, which is the one field
+ * redactProxyUrl() masks — a substituted secret cannot be echoed back through
+ * the username, host, path or query. URL serialization percent-encodes it, so a
+ * password containing "@" or "/" cannot re-point the upstream at another host.
  *
- * Throws on an unprefixed name, or on a variable that is unset or empty. An
- * empty expansion is never silently allowed: it would produce a broken upstream
- * that is very hard to diagnose. Bare $VAR is left alone, so existing literal
- * URLs containing "$" keep working.
+ * A URL with no username, or one that already carries a password, is returned
+ * untouched; so is any URL when the variable is unset.
  */
-export function expandProxyUrlEnv(
+export function mergeUpstreamPassword(
   proxyUrl: string,
   env: NodeJS.ProcessEnv = process.env,
 ): string {
-  return proxyUrl.replace(/\$\{([^}]*)\}/g, (_match, name: string) => {
-    if (!name.startsWith(ENV_PREFIX)) {
-      throw new Error(
-        `Refusing to expand \${${name}}: only variables prefixed with ${ENV_PREFIX} can be read.`,
-      );
-    }
-    const value = env[name];
-    if (!value) {
-      throw new Error(`Environment variable ${name} is unset or empty.`);
-    }
-    return value;
-  });
+  const password = env[UPSTREAM_PASSWORD_ENV];
+  if (!password) return proxyUrl;
+
+  let url: URL;
+  try {
+    url = new URL(proxyUrl);
+  } catch {
+    return proxyUrl; // let the caller's own parsing report the problem
+  }
+  if (!url.username || url.password) return proxyUrl;
+
+  url.password = password;
+  return url.toString();
 }

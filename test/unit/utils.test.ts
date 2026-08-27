@@ -1,6 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { truncateResult, getLocalIP, serializeHeaders, capString, redactProxyUrl, expandProxyUrlEnv } from "../../src/utils.js";
+import { parse } from "node:url";
+import { truncateResult, getLocalIP, serializeHeaders, capString, redactProxyUrl, mergeUpstreamPassword } from "../../src/utils.js";
 
 describe("truncateResult", () => {
   it("returns short data unchanged", () => {
@@ -63,25 +64,30 @@ describe("redactProxyUrl", () => {
   it("redacts the password and keeps the username", () => {
     assert.equal(
       redactProxyUrl("http://user:s3cret@proxy.example.com:8000"),
-      "http://user:***@proxy.example.com:8000",
+      "http://user:***@proxy.example.com:8000/",
     );
   });
 
   it("keeps a username that encodes configuration", () => {
     assert.equal(
       redactProxyUrl("http://groups-RESIDENTIAL,country-US:apify_proxy_abc@proxy.apify.com:8000"),
-      "http://groups-RESIDENTIAL,country-US:***@proxy.apify.com:8000",
+      "http://groups-RESIDENTIAL,country-US:***@proxy.apify.com:8000/",
     );
   });
 
-  it("leaves a URL without a password unchanged", () => {
-    assert.equal(redactProxyUrl("http://proxy.example.com:8000"), "http://proxy.example.com:8000");
-    assert.equal(redactProxyUrl("http://user@proxy.example.com:8000"), "http://user@proxy.example.com:8000");
-    assert.equal(redactProxyUrl("http://user:@proxy.example.com:8000"), "http://user:@proxy.example.com:8000");
+  it("leaves a URL without a password alone", () => {
+    assert.equal(redactProxyUrl("http://proxy.example.com:8000"), "http://proxy.example.com:8000/");
+    assert.equal(redactProxyUrl("http://user@proxy.example.com:8000"), "http://user@proxy.example.com:8000/");
   });
 
-  it("does not append a trailing slash", () => {
-    assert.ok(!redactProxyUrl("http://user:pass@host:8000").endsWith("/"));
+  it("redacts a pac+http token carried in the query", () => {
+    const out = redactProxyUrl("pac+http://pac.example.com/proxy.pac?token=SECRET");
+    assert.ok(!out.includes("SECRET"));
+    assert.equal(out, "pac+http://pac.example.com/proxy.pac?token=***");
+  });
+
+  it("redacts a password duplicated into the query", () => {
+    assert.ok(!redactProxyUrl("http://u:SECRET@host:8000?dup=SECRET").includes("SECRET"));
   });
 
   it("handles socks and pac schemes", () => {
@@ -96,7 +102,7 @@ describe("redactProxyUrl", () => {
   it("redacts percent-encoded credentials", () => {
     assert.equal(
       redactProxyUrl("http://us%40er:p%3Aass@host:8000"),
-      "http://us%40er:***@host:8000",
+      "http://us%40er:***@host:8000/",
     );
   });
 
@@ -111,80 +117,62 @@ describe("redactProxyUrl", () => {
   });
 });
 
-describe("expandProxyUrlEnv", () => {
-  const env = { PROXY_MCP_PASS: "s3cret", PROXY_MCP_USER: "alice", PROXY_MCP_EMPTY: "" };
+describe("mergeUpstreamPassword", () => {
+  const env = { PROXY_MCP_UPSTREAM_PASSWORD: "s3cret" };
 
-  it("expands a prefixed placeholder", () => {
+  it("fills the password slot of a username-only URL", () => {
     assert.equal(
-      expandProxyUrlEnv("http://user:${PROXY_MCP_PASS}@host:8000", env),
-      "http://user:s3cret@host:8000",
+      mergeUpstreamPassword("http://groups-RESIDENTIAL,country-US@proxy.apify.com:8000", env),
+      "http://groups-RESIDENTIAL,country-US:s3cret@proxy.apify.com:8000/",
     );
   });
 
-  it("expands several placeholders", () => {
+  it("puts the secret nowhere but the password slot", () => {
+    const out = mergeUpstreamPassword("http://user@host:8000/path?q=1", env);
+    const url = new URL(out);
+    assert.equal(url.password, "s3cret");
+    assert.equal(url.username, "user");
+    assert.equal(url.host, "host:8000");
+    assert.equal(url.pathname, "/path");
+    assert.equal(url.search, "?q=1");
+  });
+
+  it("percent-encodes a password that would otherwise re-point the upstream", () => {
+    const out = mergeUpstreamPassword("http://user@host:8000", {
+      PROXY_MCP_UPSTREAM_PASSWORD: "p@evil.example:80/",
+    });
+    assert.equal(new URL(out).host, "host:8000");
+    assert.ok(!out.includes("@evil.example"));
+  });
+
+  it("survives mockttp's url.parse().auth round-trip", () => {
+    // mockttp reads credentials via legacy url.parse().auth (rules/http-agents.js),
+    // which percent-decodes. Encoding here must therefore be lossless, or a
+    // password containing "@" or "/" would authenticate with the wrong value.
+    const secret = "p@ss/word:with#specials";
+    const out = mergeUpstreamPassword("http://user@host:8000", {
+      PROXY_MCP_UPSTREAM_PASSWORD: secret,
+    });
+    assert.equal(parse(out).auth, `user:${secret}`);
+    assert.equal(new URL(out).host, "host:8000");
+  });
+
+  it("leaves an explicit password alone", () => {
     assert.equal(
-      expandProxyUrlEnv("http://${PROXY_MCP_USER}:${PROXY_MCP_PASS}@host:8000", env),
-      "http://alice:s3cret@host:8000",
+      mergeUpstreamPassword("http://user:mine@host:8000", env),
+      "http://user:mine@host:8000",
     );
   });
 
-  it("leaves a URL without placeholders unchanged", () => {
-    assert.equal(
-      expandProxyUrlEnv("http://user:pass@host:8000", env),
-      "http://user:pass@host:8000",
-    );
+  it("leaves a URL with no username alone", () => {
+    assert.equal(mergeUpstreamPassword("http://host:8000", env), "http://host:8000");
   });
 
-  it("refuses to read a variable outside the namespace", () => {
-    assert.throws(
-      () => expandProxyUrlEnv("http://x:${AWS_SECRET_ACCESS_KEY}@evil.example:80", {
-        AWS_SECRET_ACCESS_KEY: "leak-me",
-      }),
-      /only variables prefixed with PROXY_MCP_/,
-    );
+  it("is a no-op when the variable is unset", () => {
+    assert.equal(mergeUpstreamPassword("http://user@host:8000", {}), "http://user@host:8000");
   });
 
-  it("never leaks the value of a refused variable", () => {
-    try {
-      expandProxyUrlEnv("http://x:${SECRET}@host:80", { SECRET: "leak-me" });
-      assert.fail("should have thrown");
-    } catch (e) {
-      assert.ok(!String(e).includes("leak-me"));
-    }
-  });
-
-  it("throws on an unset variable rather than expanding to empty", () => {
-    assert.throws(
-      () => expandProxyUrlEnv("http://u:${PROXY_MCP_MISSING}@host:80", env),
-      /PROXY_MCP_MISSING is unset or empty/,
-    );
-  });
-
-  it("throws on an empty variable", () => {
-    assert.throws(
-      () => expandProxyUrlEnv("http://u:${PROXY_MCP_EMPTY}@host:80", env),
-      /PROXY_MCP_EMPTY is unset or empty/,
-    );
-  });
-
-  it("leaves bare $VAR alone", () => {
-    assert.equal(
-      expandProxyUrlEnv("http://user:pa$$word@host:8000", env),
-      "http://user:pa$$word@host:8000",
-    );
-    assert.equal(
-      expandProxyUrlEnv("http://user:$PROXY_MCP_PASS@host:8000", env),
-      "http://user:$PROXY_MCP_PASS@host:8000",
-    );
-  });
-
-  it("does not re-scan an expanded value", () => {
-    assert.equal(
-      expandProxyUrlEnv("http://u:${PROXY_MCP_NESTED}@host:80", {
-        PROXY_MCP_NESTED: "${PROXY_MCP_PASS}",
-        PROXY_MCP_PASS: "s3cret",
-      }),
-      "http://u:${PROXY_MCP_PASS}@host:80",
-    );
+  it("returns an unparseable URL untouched for the caller to reject", () => {
+    assert.equal(mergeUpstreamPassword("not a url", env), "not a url");
   });
 });
