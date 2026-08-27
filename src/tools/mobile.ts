@@ -24,7 +24,7 @@ import { join } from "node:path";
 import { randomBytes } from "node:crypto";
 import { proxyManager } from "../state.js";
 import { interceptorManager } from "../interceptors/manager.js";
-import { mergeUpstreamPassword } from "../utils.js";
+import { mergeUpstreamPassword, upstreamPasswordSource } from "../utils.js";
 
 function errorToString(e: unknown): string {
   if (e instanceof Error) return e.message;
@@ -313,6 +313,9 @@ export function registerMobileTools(server: McpServer): void {
               transparent_port: transparentPortUsed,
               block_quic,
               upstream_set: upstreamSet,
+              ...(upstream_proxy_url && resolvedUpstream
+                ? { password_source: upstreamPasswordSource(upstream_proxy_url, resolvedUpstream) }
+                : {}),
               cert_injected: certInjected,
               android_target_id: androidTargetId,
               sudo_script: scriptPath,

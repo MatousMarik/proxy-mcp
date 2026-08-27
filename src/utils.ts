@@ -124,7 +124,7 @@ export function redactProxyUrl(proxyUrl: string): string {
  *
  * The value can only ever land in the password slot, which is the one field
  * redactProxyUrl() masks — a substituted secret cannot be echoed back through
- * the username, host, path or query. URL serialization percent-encodes it, so a
+ * the username, host, path or query. The value is percent-encoded, so a
  * password containing "@" or "/" cannot re-point the upstream at another host.
  *
  * A URL with no username, or one that already carries a password, is returned
@@ -145,6 +145,32 @@ export function mergeUpstreamPassword(
   }
   if (!url.username || url.password) return proxyUrl;
 
-  url.password = password;
+  // encodeURIComponent, not the raw value: the password setter escapes "@" and
+  // "/" but leaves "%" alone, and mockttp reads the credential back through
+  // url.parse().auth, which decodeURIComponent()s it. A raw "%" therefore makes
+  // that decode throw, and a raw "%20" silently decodes to a space. Encoding
+  // first is lossless — the setter escapes nothing encodeURIComponent leaves.
+  url.password = encodeURIComponent(password);
   return url.toString();
+}
+
+/**
+ * Which credential a resolved upstream URL ended up using, for the tool
+ * response.
+ *
+ * A caller that omits the password when the server has no
+ * PROXY_MCP_UPSTREAM_PASSWORD otherwise gets a plain "success" and finds out
+ * only later, as unexplained 407s on unrelated requests. "none" says so at the
+ * call that can still be corrected.
+ */
+export function upstreamPasswordSource(
+  original: string,
+  resolved: string,
+): "env" | "url" | "none" {
+  if (resolved !== original) return "env";
+  try {
+    return new URL(original).password ? "url" : "none";
+  } catch {
+    return "none";
+  }
 }

@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { parse } from "node:url";
-import { truncateResult, getLocalIP, serializeHeaders, capString, redactProxyUrl, mergeUpstreamPassword } from "../../src/utils.js";
+import { truncateResult, getLocalIP, serializeHeaders, capString, redactProxyUrl, mergeUpstreamPassword, upstreamPasswordSource } from "../../src/utils.js";
 
 describe("truncateResult", () => {
   it("returns short data unchanged", () => {
@@ -158,6 +158,18 @@ describe("mergeUpstreamPassword", () => {
     assert.equal(new URL(out).host, "host:8000");
   });
 
+  it("survives the round-trip with a '%' in the password", () => {
+    // The password setter escapes "@" and "/" but not "%", while url.parse()
+    // decodeURIComponent()s the auth: a raw "%" made that decode throw, and a
+    // raw "%20" decoded to a space. Both must come back byte-identical.
+    for (const secret of ["100%pass", "p%20ss", "%"]) {
+      const out = mergeUpstreamPassword("http://user@host:8000", {
+        PROXY_MCP_UPSTREAM_PASSWORD: secret,
+      });
+      assert.equal(parse(out).auth, `user:${secret}`);
+    }
+  });
+
   it("reaches https-proxy-agent intact, including a ':' in the password", () => {
     // https-proxy-agent takes the whole auth string, so ":" is safe here.
     const secret = "pa:ss/word";
@@ -204,5 +216,20 @@ describe("mergeUpstreamPassword", () => {
 
   it("returns an unparseable URL untouched for the caller to reject", () => {
     assert.equal(mergeUpstreamPassword("not a url", env), "not a url");
+  });
+});
+
+describe("upstreamPasswordSource", () => {
+  const env = { PROXY_MCP_UPSTREAM_PASSWORD: "s3cret" };
+  const source = (url: string, e: NodeJS.ProcessEnv) =>
+    upstreamPasswordSource(url, mergeUpstreamPassword(url, e));
+
+  it("reports where the password came from", () => {
+    assert.equal(source("http://user@host:8000", env), "env");
+    assert.equal(source("http://user:mine@host:8000", env), "url");
+    // The case worth reporting: caller omitted it and the server has no
+    // variable, so the upstream is about to be used unauthenticated.
+    assert.equal(source("http://user@host:8000", {}), "none");
+    assert.equal(source("http://host:8000", env), "none");
   });
 });

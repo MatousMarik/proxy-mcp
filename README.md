@@ -189,14 +189,37 @@ Supported upstream URL schemes: `socks4://`, `socks5://`, `http://`, `https://`,
 
 Tool calls and tool results are both persisted by the MCP client. To avoid
 writing an upstream password there on every call, set it in the server's
-environment and pass a URL with a username but no password:
+environment and pass a URL with a username but no password.
+
+The variable has to be in the environment of the **server process**, which the
+MCP client spawns — exporting it in your own shell does not reach it:
 
 ```bash
-export PROXY_MCP_UPSTREAM_PASSWORD="s3cret"
+claude mcp add proxy-mcp -e PROXY_MCP_UPSTREAM_PASSWORD=s3cret -- npx -y proxy-mcp@latest
+```
 
+```json
+{
+  "mcpServers": {
+    "proxy-mcp": {
+      "command": "npx",
+      "args": ["-y", "proxy-mcp@latest"],
+      "env": { "PROXY_MCP_UPSTREAM_PASSWORD": "s3cret" }
+    }
+  }
+}
+```
+
+Then omit the password from the call:
+
+```bash
 proxy_set_upstream --proxy_url "http://user@upstream.example:1080"
 # routes as http://user:s3cret@upstream.example:1080
 ```
+
+The response reports which credential was used — `passwordSource` is `env`,
+`url` or `none`. `none` on a URL you expected the variable to complete means the
+server does not have it in its environment.
 
 Applies to `proxy_set_upstream`, `proxy_set_host_upstream` and
 `proxy_mobile_setup`. A URL that already carries a password is used as-is, so
@@ -410,7 +433,8 @@ proxy_mobile_setup \
 Applies to BOTH listeners. Use `proxy_set_upstream` after the fact to change it without restarting.
 
 As with `proxy_set_upstream`, omit the password and set
-`PROXY_MCP_UPSTREAM_PASSWORD` in the environment to keep it out of the call.
+`PROXY_MCP_UPSTREAM_PASSWORD` in the server's environment to keep it out of the
+call.
 
 ### Verifying each step
 

@@ -5,7 +5,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { proxyManager } from "../state.js";
-import { mergeUpstreamPassword, redactProxyUrl } from "../utils.js";
+import { mergeUpstreamPassword, redactProxyUrl, upstreamPasswordSource } from "../utils.js";
 
 export function registerUpstreamTools(server: McpServer): void {
   server.tool(
@@ -25,6 +25,7 @@ export function registerUpstreamTools(server: McpServer): void {
             text: JSON.stringify({
               status: "success",
               message: `Global upstream set to ${redactProxyUrl(resolved)}`,
+              passwordSource: upstreamPasswordSource(proxy_url, resolved),
               noProxy: no_proxy || [],
             }),
           }],
@@ -72,6 +73,7 @@ export function registerUpstreamTools(server: McpServer): void {
             text: JSON.stringify({
               status: "success",
               message: `Upstream for '${hostname}' set to ${redactProxyUrl(resolved)}`,
+              passwordSource: upstreamPasswordSource(proxy_url, resolved),
             }),
           }],
         };
