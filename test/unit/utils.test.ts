@@ -146,15 +146,45 @@ describe("mergeUpstreamPassword", () => {
   });
 
   it("survives mockttp's url.parse().auth round-trip", () => {
-    // mockttp reads credentials via legacy url.parse().auth (rules/http-agents.js),
+    // mockttp reads credentials via legacy url.parse().auth (rules/http-agents.js:57),
     // which percent-decodes. Encoding here must therefore be lossless, or a
     // password containing "@" or "/" would authenticate with the wrong value.
-    const secret = "p@ss/word:with#specials";
+    // ":" is excluded deliberately — see the socks test below.
+    const secret = "p@ss/word#with?specials";
     const out = mergeUpstreamPassword("http://user@host:8000", {
       PROXY_MCP_UPSTREAM_PASSWORD: secret,
     });
     assert.equal(parse(out).auth, `user:${secret}`);
     assert.equal(new URL(out).host, "host:8000");
+  });
+
+  it("reaches https-proxy-agent intact, including a ':' in the password", () => {
+    // https-proxy-agent takes the whole auth string, so ":" is safe here.
+    const secret = "pa:ss/word";
+    const out = mergeUpstreamPassword("https://user@host:8443", {
+      PROXY_MCP_UPSTREAM_PASSWORD: secret,
+    });
+    const auth = parse(out).auth!;
+    assert.equal(auth.slice(auth.indexOf(":") + 1), secret);
+  });
+
+  it("documents that a socks upstream truncates a password at ':'", () => {
+    // socks-proxy-agent@7 does opts.auth.split(":") and takes [1]
+    // (mockttp/node_modules/socks-proxy-agent/dist/index.js:78-81), so anything
+    // after the first ":" is dropped. This is a pre-existing toolchain limit,
+    // not something this merge introduces: a literal socks5://u:pa%3Ass@host
+    // truncates identically. Pinned so the restriction is visible, and so this
+    // fails if socks-proxy-agent ever starts honouring the full password.
+    const out = mergeUpstreamPassword("socks5://user@host:1080", {
+      PROXY_MCP_UPSTREAM_PASSWORD: "pa:ss",
+    });
+    assert.equal(parse(out).auth!.split(":")[1], "pa");
+
+    // ...while a socks password with no ":" is delivered whole.
+    const ok = mergeUpstreamPassword("socks5://user@host:1080", {
+      PROXY_MCP_UPSTREAM_PASSWORD: "p@ss/word",
+    });
+    assert.equal(parse(ok).auth!.split(":")[1], "p@ss/word");
   });
 
   it("leaves an explicit password alone", () => {

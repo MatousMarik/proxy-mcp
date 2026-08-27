@@ -203,6 +203,14 @@ Applies to `proxy_set_upstream`, `proxy_set_host_upstream` and
 existing calls are unaffected. One credential covers all upstreams; a URL
 without a username is left alone.
 
+> **`socks4://`/`socks5://` upstreams: avoid `:` in the password.**
+> socks-proxy-agent splits the credential on the first `:` and keeps only what
+> follows it, so `pa:ss` authenticates as `pa`. This is a toolchain limitation
+> rather than something the environment variable introduces — a literal
+> `socks5://user:pa%3Ass@host:1080` truncates the same way — but it fails
+> silently, so it is worth knowing. `http://`, `https://` and `pac+http://`
+> upstreams take the whole password.
+
 Responses redact credentials — the password in userinfo, and query values,
 which is where a `pac+http://` token normally lives:
 
