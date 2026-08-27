@@ -71,6 +71,10 @@ node dist/index.js --transport http --port 3001
 
 `--transport` and `--port` also accept env vars `TRANSPORT` and `PORT`.
 
+`PROXY_MCP_UPSTREAM_PASSWORD` and `PROXY_MCP_UPSTREAM_HOST` keep an upstream
+proxy password out of the transcript — see
+[Keeping the upstream password out of the transcript](#keeping-the-upstream-password-out-of-the-transcript).
+
 ### Manual MCP configuration
 
 The configured server alias controls Claude's generated tool prefix. The examples below use `proxy-mcp`, so Claude Code exposes tools as `mcp__proxy-mcp__<tool_name>`. If you rename the server key to `proxy`, use `mcp__proxy__<tool_name>` instead.
@@ -191,11 +195,20 @@ Tool calls and tool results are both persisted by the MCP client. To avoid
 writing an upstream password there on every call, set it in the server's
 environment and pass a URL with a username but no password.
 
-The variable has to be in the environment of the **server process**, which the
-MCP client spawns — exporting it in your own shell does not reach it:
+Two variables are required, and both have to be in the environment of the
+**server process**, which the MCP client spawns — exporting them in your own
+shell does not reach it:
+
+| variable | meaning |
+|---|---|
+| `PROXY_MCP_UPSTREAM_PASSWORD` | the password to fill in |
+| `PROXY_MCP_UPSTREAM_HOST` | the only hostname it may be sent to |
 
 ```bash
-claude mcp add proxy-mcp -e PROXY_MCP_UPSTREAM_PASSWORD=s3cret -- npx -y proxy-mcp@latest
+claude mcp add proxy-mcp \
+  -e PROXY_MCP_UPSTREAM_PASSWORD=s3cret \
+  -e PROXY_MCP_UPSTREAM_HOST=upstream.example \
+  -- npx -y proxy-mcp@latest
 ```
 
 ```json
@@ -204,7 +217,10 @@ claude mcp add proxy-mcp -e PROXY_MCP_UPSTREAM_PASSWORD=s3cret -- npx -y proxy-m
     "proxy-mcp": {
       "command": "npx",
       "args": ["-y", "proxy-mcp@latest"],
-      "env": { "PROXY_MCP_UPSTREAM_PASSWORD": "s3cret" }
+      "env": {
+        "PROXY_MCP_UPSTREAM_PASSWORD": "s3cret",
+        "PROXY_MCP_UPSTREAM_HOST": "upstream.example"
+      }
     }
   }
 }
@@ -217,14 +233,32 @@ proxy_set_upstream --proxy_url "http://user@upstream.example:1080"
 # routes as http://user:s3cret@upstream.example:1080
 ```
 
+**Why the host variable exists.** Without it, a caller who cannot read the
+password could still name any host and have the password delivered there — the
+proxy sends it on the first request, and the transcript would show only `***`.
+The hostname is matched case-insensitively and exactly, with no wildcards; the
+port is not part of the match, so one variable covers a provider offering
+several. A URL naming any other host is left alone. If
+`PROXY_MCP_UPSTREAM_PASSWORD` is set and `PROXY_MCP_UPSTREAM_HOST` is not,
+nothing is merged at all: a half-configuration fails closed rather than
+becoming an unbound credential.
+
 The response reports which credential was used — `passwordSource` is `env`,
-`url` or `none`. `none` on a URL you expected the variable to complete means the
-server does not have it in its environment.
+`url` or `none`. `none` means no password was applied to a URL that names a
+user: either the credential is genuinely username-only, or the server does not
+have both variables set for this host. The field is omitted for a URL with no
+username, where the question does not arise.
 
 Applies to `proxy_set_upstream`, `proxy_set_host_upstream` and
 `proxy_mobile_setup`. A URL that already carries a password is used as-is, so
-existing calls are unaffected. One credential covers all upstreams; a URL
-without a username is left alone.
+existing calls are unaffected. One credential covers all upstreams at the
+pinned host; a URL without a username is left alone.
+
+> **Username-only credentials at the pinned host cannot be expressed.** A URL
+> with a username and no password is exactly the syntax that requests the
+> merge, and `user:@host` cannot signal otherwise — the URL parser erases the
+> empty password before the server sees it. If the pinned host authenticates on
+> the username alone, unset `PROXY_MCP_UPSTREAM_PASSWORD` for that server.
 
 > **`socks4://`/`socks5://` upstreams: avoid `:` in the password.**
 > socks-proxy-agent splits the credential on the first `:` and keeps only what
@@ -234,14 +268,18 @@ without a username is left alone.
 > silently, so it is worth knowing. `http://`, `https://` and `pac+http://`
 > upstreams take the whole password.
 
-Responses redact credentials — the password in userinfo, and query values,
-which is where a `pac+http://` token normally lives:
+Responses redact credentials — the password in userinfo, plus query values,
+path segments and any fragment, since a `pac+http://` token may live in any of
+those:
 
 ```
 Global upstream set to http://user:***@upstream.example:1080/
+Global upstream set to pac+http://pac.example.com/***?token=***
 ```
 
-`proxy_status` and the `proxy://status` resource are redacted the same way.
+`proxy_status` and the `proxy://status` resource are redacted the same way. A
+PAC URL's filename is masked along with the rest of the path, so a confirmation
+message shows the host and nothing else.
 
 **The username is not redacted.** For several providers it is configuration
 rather than a secret — Apify Proxy encodes proxy group, country and
@@ -433,8 +471,8 @@ proxy_mobile_setup \
 Applies to BOTH listeners. Use `proxy_set_upstream` after the fact to change it without restarting.
 
 As with `proxy_set_upstream`, omit the password and set
-`PROXY_MCP_UPSTREAM_PASSWORD` in the server's environment to keep it out of the
-call.
+`PROXY_MCP_UPSTREAM_PASSWORD` and `PROXY_MCP_UPSTREAM_HOST` in the server's
+environment to keep it out of the call.
 
 ### Verifying each step
 

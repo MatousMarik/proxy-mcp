@@ -83,7 +83,19 @@ describe("redactProxyUrl", () => {
   it("redacts a pac+http token carried in the query", () => {
     const out = redactProxyUrl("pac+http://pac.example.com/proxy.pac?token=SECRET");
     assert.ok(!out.includes("SECRET"));
-    assert.equal(out, "pac+http://pac.example.com/proxy.pac?token=***");
+    assert.equal(out, "pac+http://pac.example.com/***?token=***");
+  });
+
+  it("masks path segments and drops the fragment", () => {
+    // A PAC provider may carry its token in the path rather than the query, and
+    // no agent in this stack reads the fragment. Neither is worth echoing.
+    assert.equal(
+      redactProxyUrl("pac+http://pac.example.com/AbC123token/proxy.pac"),
+      "pac+http://pac.example.com/***/***",
+    );
+    assert.ok(!redactProxyUrl("http://u:p@host:8000/tok#frag").includes("frag"));
+    // An authority-only URL has no path to mask.
+    assert.equal(redactProxyUrl("http://host:8000"), "http://host:8000/");
   });
 
   it("redacts a password duplicated into the query", () => {
@@ -95,7 +107,7 @@ describe("redactProxyUrl", () => {
     assert.equal(redactProxyUrl("socks4://host:1080"), "socks4://host:1080");
     assert.equal(
       redactProxyUrl("pac+http://example.com/proxy.pac"),
-      "pac+http://example.com/proxy.pac",
+      "pac+http://example.com/***",
     );
   });
 
@@ -110,19 +122,41 @@ describe("redactProxyUrl", () => {
     assert.equal(redactProxyUrl("not a url"), "<unparseable url>");
     assert.equal(redactProxyUrl(""), "<unparseable url>");
   });
-
-  it("leaves no trace of the secret in its output", () => {
-    const out = redactProxyUrl("http://user:topsecret@host:8000");
-    assert.ok(!out.includes("topsecret"));
-  });
 });
 
 describe("mergeUpstreamPassword", () => {
-  const env = { PROXY_MCP_UPSTREAM_PASSWORD: "s3cret" };
+  const env = { PROXY_MCP_UPSTREAM_PASSWORD: "s3cret", PROXY_MCP_UPSTREAM_HOST: "host" };
+  const at = (hostname: string) => ({
+    PROXY_MCP_UPSTREAM_PASSWORD: "s3cret",
+    PROXY_MCP_UPSTREAM_HOST: hostname,
+  });
+
+  it("sends the password only to the pinned host", () => {
+    // The password must not be deliverable to a host the caller picks: that is
+    // exfiltration by delivery, which redaction cannot see.
+    const out = mergeUpstreamPassword("http://x@attacker.example:8000", at("proxy.apify.com"));
+    assert.equal(out, "http://x@attacker.example:8000");
+    assert.equal(new URL(out).password, "");
+  });
+
+  it("matches the host case-insensitively and ignores the port", () => {
+    assert.equal(
+      new URL(mergeUpstreamPassword("http://u@Proxy.Example:9000", at("proxy.example"))).password,
+      "s3cret",
+    );
+  });
+
+  it("fails closed when the host variable is unset", () => {
+    // A half-configuration must not degrade into an unbound credential.
+    assert.equal(
+      mergeUpstreamPassword("http://u@host:8000", { PROXY_MCP_UPSTREAM_PASSWORD: "s3cret" }),
+      "http://u@host:8000",
+    );
+  });
 
   it("fills the password slot of a username-only URL", () => {
     assert.equal(
-      mergeUpstreamPassword("http://groups-RESIDENTIAL,country-US@proxy.apify.com:8000", env),
+      mergeUpstreamPassword("http://groups-RESIDENTIAL,country-US@proxy.apify.com:8000", at("proxy.apify.com")),
       "http://groups-RESIDENTIAL,country-US:s3cret@proxy.apify.com:8000/",
     );
   });
@@ -140,6 +174,7 @@ describe("mergeUpstreamPassword", () => {
   it("percent-encodes a password that would otherwise re-point the upstream", () => {
     const out = mergeUpstreamPassword("http://user@host:8000", {
       PROXY_MCP_UPSTREAM_PASSWORD: "p@evil.example:80/",
+      PROXY_MCP_UPSTREAM_HOST: "host",
     });
     assert.equal(new URL(out).host, "host:8000");
     assert.ok(!out.includes("@evil.example"));
@@ -153,6 +188,7 @@ describe("mergeUpstreamPassword", () => {
     const secret = "p@ss/word#with?specials";
     const out = mergeUpstreamPassword("http://user@host:8000", {
       PROXY_MCP_UPSTREAM_PASSWORD: secret,
+      PROXY_MCP_UPSTREAM_HOST: "host",
     });
     assert.equal(parse(out).auth, `user:${secret}`);
     assert.equal(new URL(out).host, "host:8000");
@@ -165,6 +201,7 @@ describe("mergeUpstreamPassword", () => {
     for (const secret of ["100%pass", "p%20ss", "%"]) {
       const out = mergeUpstreamPassword("http://user@host:8000", {
         PROXY_MCP_UPSTREAM_PASSWORD: secret,
+        PROXY_MCP_UPSTREAM_HOST: "host",
       });
       assert.equal(parse(out).auth, `user:${secret}`);
     }
@@ -175,6 +212,7 @@ describe("mergeUpstreamPassword", () => {
     const secret = "pa:ss/word";
     const out = mergeUpstreamPassword("https://user@host:8443", {
       PROXY_MCP_UPSTREAM_PASSWORD: secret,
+      PROXY_MCP_UPSTREAM_HOST: "host",
     });
     const auth = parse(out).auth!;
     assert.equal(auth.slice(auth.indexOf(":") + 1), secret);
@@ -189,12 +227,14 @@ describe("mergeUpstreamPassword", () => {
     // fails if socks-proxy-agent ever starts honouring the full password.
     const out = mergeUpstreamPassword("socks5://user@host:1080", {
       PROXY_MCP_UPSTREAM_PASSWORD: "pa:ss",
+      PROXY_MCP_UPSTREAM_HOST: "host",
     });
     assert.equal(parse(out).auth!.split(":")[1], "pa");
 
     // ...while a socks password with no ":" is delivered whole.
     const ok = mergeUpstreamPassword("socks5://user@host:1080", {
       PROXY_MCP_UPSTREAM_PASSWORD: "p@ss/word",
+      PROXY_MCP_UPSTREAM_HOST: "host",
     });
     assert.equal(parse(ok).auth!.split(":")[1], "p@ss/word");
   });
@@ -220,16 +260,19 @@ describe("mergeUpstreamPassword", () => {
 });
 
 describe("upstreamPasswordSource", () => {
-  const env = { PROXY_MCP_UPSTREAM_PASSWORD: "s3cret" };
+  const env = { PROXY_MCP_UPSTREAM_PASSWORD: "s3cret", PROXY_MCP_UPSTREAM_HOST: "host" };
   const source = (url: string, e: NodeJS.ProcessEnv) =>
     upstreamPasswordSource(url, mergeUpstreamPassword(url, e));
 
   it("reports where the password came from", () => {
     assert.equal(source("http://user@host:8000", env), "env");
     assert.equal(source("http://user:mine@host:8000", env), "url");
-    // The case worth reporting: caller omitted it and the server has no
-    // variable, so the upstream is about to be used unauthenticated.
+    // The case worth reporting: the caller named a user, no password was
+    // applied, so the upstream is about to be used username-only.
     assert.equal(source("http://user@host:8000", {}), "none");
-    assert.equal(source("http://host:8000", env), "none");
+    // No username, no question to answer — the field is omitted entirely
+    // rather than warning about a correctly unauthenticated upstream.
+    assert.equal(source("http://host:8000", env), null);
+    assert.equal(source("not a url", env), null);
   });
 });

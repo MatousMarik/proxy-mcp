@@ -24,7 +24,7 @@ import { join } from "node:path";
 import { randomBytes } from "node:crypto";
 import { proxyManager } from "../state.js";
 import { interceptorManager } from "../interceptors/manager.js";
-import { mergeUpstreamPassword, upstreamPasswordSource } from "../utils.js";
+import { isParseableUrl, mergeUpstreamPassword, upstreamPasswordSource } from "../utils.js";
 
 function errorToString(e: unknown): string {
   if (e instanceof Error) return e.message;
@@ -216,11 +216,17 @@ export function registerMobileTools(server: McpServer): void {
       inject_cert,
     }) => {
       try {
-        // Resolve the upstream credential before starting anything: cheap, and
-        // keeps a bad value from leaving listeners running behind an error.
+        // Validate and resolve the upstream before starting anything, so a
+        // typo'd URL cannot leave both listeners running behind an error.
+        if (upstream_proxy_url && !isParseableUrl(upstream_proxy_url)) {
+          throw new Error("upstream_proxy_url is not a parseable URL — check the scheme, e.g. socks5://host:1080");
+        }
         const resolvedUpstream = upstream_proxy_url
           ? mergeUpstreamPassword(upstream_proxy_url)
           : undefined;
+        const passwordSource = upstream_proxy_url
+          ? upstreamPasswordSource(upstream_proxy_url, resolvedUpstream!)
+          : null;
 
         // 1. Resolve AP iface.
         let apIface = ap_iface;
@@ -313,9 +319,7 @@ export function registerMobileTools(server: McpServer): void {
               transparent_port: transparentPortUsed,
               block_quic,
               upstream_set: upstreamSet,
-              ...(upstream_proxy_url && resolvedUpstream
-                ? { password_source: upstreamPasswordSource(upstream_proxy_url, resolvedUpstream) }
-                : {}),
+              ...(passwordSource ? { passwordSource } : {}),
               cert_injected: certInjected,
               android_target_id: androidTargetId,
               sudo_script: scriptPath,

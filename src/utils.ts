@@ -84,25 +84,19 @@ export function capString(s: string, maxLen: number): string {
   return s.slice(0, maxLen) + "...";
 }
 
-/**
- * Environment variable holding the upstream proxy password.
- *
- * One credential for all upstreams. Per-provider secrets would need
- * PROXY_MCP_UPSTREAM_PASSWORD_<HOST> or similar; nothing needs that yet.
- */
+/** Upstream proxy password, and the one hostname it may be sent to. */
 const UPSTREAM_PASSWORD_ENV = "PROXY_MCP_UPSTREAM_PASSWORD";
+const UPSTREAM_HOST_ENV = "PROXY_MCP_UPSTREAM_HOST";
 
 /**
  * Replace credentials in a proxy URL with "***" for safe logging.
  *
- * Upstream proxy URLs carry credentials, and tool responses are persisted in
- * the MCP client transcript. The username is preserved on purpose: for some
- * providers it is configuration rather than a secret (Apify Proxy encodes
- * proxy group, country and sticky-session id there), and it is what makes a
- * confirmation message worth printing. See the README security section.
- *
- * Query values are redacted too: a pac+http:// URL normally carries its token
- * in the query rather than in userinfo.
+ * The username is preserved on purpose: for some providers it is configuration
+ * rather than a secret (Apify Proxy encodes proxy group, country and
+ * sticky-session id there), and it is what makes a confirmation message worth
+ * printing. Everything else that can carry a token is masked — query values,
+ * path segments and the fragment — because a pac+http:// URL carries its token
+ * in one of those and no agent in this stack needs any of them echoed back.
  */
 export function redactProxyUrl(proxyUrl: string): string {
   let url: URL;
@@ -115,6 +109,8 @@ export function redactProxyUrl(proxyUrl: string): string {
   for (const key of [...url.searchParams.keys()]) {
     url.searchParams.set(key, "***");
   }
+  url.hash = "";
+  url.pathname = url.pathname.replace(/[^/]+/g, "***");
   return url.toString();
 }
 
@@ -122,28 +118,32 @@ export function redactProxyUrl(proxyUrl: string): string {
  * Fill in the upstream password from the environment when the caller supplied
  * a username but no password, so a credential need not appear in the tool call.
  *
- * The value can only ever land in the password slot, which is the one field
- * redactProxyUrl() masks — a substituted secret cannot be echoed back through
- * the username, host, path or query. The value is percent-encoded, so a
- * password containing "@" or "/" cannot re-point the upstream at another host.
+ * Two conditions, both required. The value only ever lands in the password
+ * slot, so it cannot be echoed back through the username, host, path or query;
+ * and it is only ever sent to PROXY_MCP_UPSTREAM_HOST, so a caller who cannot
+ * read the value cannot have it delivered to a host of their choosing either.
+ * Without the host variable nothing is merged — a half-configuration must not
+ * degrade into an unbound credential.
  *
  * A URL with no username, or one that already carries a password, is returned
- * untouched; so is any URL when the variable is unset.
+ * untouched; so is any URL when either variable is unset.
  */
 export function mergeUpstreamPassword(
   proxyUrl: string,
   env: NodeJS.ProcessEnv = process.env,
 ): string {
   const password = env[UPSTREAM_PASSWORD_ENV];
-  if (!password) return proxyUrl;
+  const host = env[UPSTREAM_HOST_ENV]?.trim();
+  if (!password || !host) return proxyUrl;
 
   let url: URL;
   try {
     url = new URL(proxyUrl);
   } catch {
-    return proxyUrl; // let the caller's own parsing report the problem
+    return proxyUrl; // the tool boundary rejects it
   }
   if (!url.username || url.password) return proxyUrl;
+  if (url.hostname.toLowerCase() !== host.toLowerCase()) return proxyUrl;
 
   // encodeURIComponent, not the raw value: the password setter escapes "@" and
   // "/" but leaves "%" alone, and mockttp reads the credential back through
@@ -155,22 +155,36 @@ export function mergeUpstreamPassword(
 }
 
 /**
- * Which credential a resolved upstream URL ended up using, for the tool
- * response.
+ * Which credential a resolved upstream URL ended up using, or null when the URL
+ * carries no username and the question does not arise.
  *
- * A caller that omits the password when the server has no
- * PROXY_MCP_UPSTREAM_PASSWORD otherwise gets a plain "success" and finds out
- * only later, as unexplained 407s on unrelated requests. "none" says so at the
- * call that can still be corrected.
+ * "none" means no password was applied to a URL that names a user — either the
+ * credential is username-only, or the server does not have both
+ * PROXY_MCP_UPSTREAM_PASSWORD and PROXY_MCP_UPSTREAM_HOST set for this host.
+ * Without it, that misconfiguration reads as plain success and surfaces later
+ * as unexplained 407s.
  */
 export function upstreamPasswordSource(
   original: string,
   resolved: string,
-): "env" | "url" | "none" {
+): "env" | "url" | "none" | null {
   if (resolved !== original) return "env";
+  let url: URL;
   try {
-    return new URL(original).password ? "url" : "none";
+    url = new URL(original);
   } catch {
-    return "none";
+    return null;
+  }
+  if (!url.username) return null;
+  return url.password ? "url" : "none";
+}
+
+/** Whether a value parses as a URL at all, for rejecting a typo at the boundary. */
+export function isParseableUrl(value: string): boolean {
+  try {
+    new URL(value);
+    return true;
+  } catch {
+    return false;
   }
 }

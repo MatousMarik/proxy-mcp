@@ -212,7 +212,7 @@ describe("ProxyManager upstream redaction", () => {
       hostUpstreams: Record<string, { proxyUrl: string }>;
     };
 
-    // Q11(b): status must never carry the raw password.
+    // Status must never carry the raw password.
     assert.ok(!JSON.stringify(status).includes(SECRET));
     assert.ok(status.globalUpstream!.proxyUrl.includes(":***@"));
     assert.ok(status.hostUpstreams["api.example.com"].proxyUrl.includes(":***@"));
@@ -234,4 +234,3 @@ describe("ProxyManager upstream redaction", () => {
     assert.equal(status.globalUpstream, null);
   });
 });
-

@@ -5,7 +5,24 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { proxyManager } from "../state.js";
-import { mergeUpstreamPassword, redactProxyUrl, upstreamPasswordSource } from "../utils.js";
+import { isParseableUrl, mergeUpstreamPassword, redactProxyUrl, upstreamPasswordSource } from "../utils.js";
+
+/**
+ * A proxy_url the code cannot parse must not report success: redaction removed
+ * the echo that used to make a typo self-evident, and nothing downstream
+ * validates it either. The value is not repeated back — it may hold a password.
+ */
+function unparseable() {
+  return {
+    content: [{
+      type: "text" as const,
+      text: JSON.stringify({
+        status: "error",
+        error: "proxy_url is not a parseable URL — check the scheme, e.g. socks5://host:1080",
+      }),
+    }],
+  };
+}
 
 export function registerUpstreamTools(server: McpServer): void {
   server.tool(
@@ -17,7 +34,9 @@ export function registerUpstreamTools(server: McpServer): void {
     },
     async ({ proxy_url, no_proxy }) => {
       try {
+        if (!isParseableUrl(proxy_url)) return unparseable();
         const resolved = mergeUpstreamPassword(proxy_url);
+        const passwordSource = upstreamPasswordSource(proxy_url, resolved);
         await proxyManager.setGlobalUpstream({ proxyUrl: resolved, noProxy: no_proxy });
         return {
           content: [{
@@ -25,7 +44,7 @@ export function registerUpstreamTools(server: McpServer): void {
             text: JSON.stringify({
               status: "success",
               message: `Global upstream set to ${redactProxyUrl(resolved)}`,
-              passwordSource: upstreamPasswordSource(proxy_url, resolved),
+              ...(passwordSource ? { passwordSource } : {}),
               noProxy: no_proxy || [],
             }),
           }],
@@ -65,7 +84,9 @@ export function registerUpstreamTools(server: McpServer): void {
     },
     async ({ hostname, proxy_url, no_proxy }) => {
       try {
+        if (!isParseableUrl(proxy_url)) return unparseable();
         const resolved = mergeUpstreamPassword(proxy_url);
+        const passwordSource = upstreamPasswordSource(proxy_url, resolved);
         await proxyManager.setHostUpstream(hostname, { proxyUrl: resolved, noProxy: no_proxy });
         return {
           content: [{
@@ -73,7 +94,7 @@ export function registerUpstreamTools(server: McpServer): void {
             text: JSON.stringify({
               status: "success",
               message: `Upstream for '${hostname}' set to ${redactProxyUrl(resolved)}`,
-              passwordSource: upstreamPasswordSource(proxy_url, resolved),
+              ...(passwordSource ? { passwordSource } : {}),
             }),
           }],
         };

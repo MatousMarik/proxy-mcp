@@ -342,13 +342,7 @@ function rewriteReplayUrl(originalUrl: string, targetBaseUrl?: string): string {
   return new URL(`${original.pathname}${original.search}`, base).toString();
 }
 
-/**
- * Copy an upstream config with its proxy URL redacted, for status output.
- *
- * proxy_status and the proxy://status resource are read far more often than a
- * set-upstream call, and clients read the resource unprompted, so this is the
- * larger writer of credentials into a transcript.
- */
+/** Copy an upstream config with its proxy URL redacted, for status output. */
 function redactUpstreamConfig(config: UpstreamProxyConfig): UpstreamProxyConfig {
   return { ...config, proxyUrl: redactProxyUrl(config.proxyUrl) };
 }
@@ -513,8 +507,8 @@ export class ProxyManager {
       port: this.port,
       url: this.server?.url ?? null,
       certFingerprint: this.cert?.fingerprint ?? null,
-      // Redacted on the way out only. The stored configs must keep their real
-      // credentials: rebuildMockttpRules() reads proxyUrl to actually route.
+      // Redacted on the way out only: resolveProxyConfig() reads the stored
+      // proxyUrl to actually route, so those must keep their real credentials.
       globalUpstream: this.globalUpstream && redactUpstreamConfig(this.globalUpstream),
       hostUpstreams: Object.fromEntries(
         [...this.hostUpstreams].map(([host, config]) => [host, redactUpstreamConfig(config)]),
