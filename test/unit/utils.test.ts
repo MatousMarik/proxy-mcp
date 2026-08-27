@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { truncateResult, getLocalIP, serializeHeaders, capString } from "../../src/utils.js";
+import { truncateResult, getLocalIP, serializeHeaders, capString, redactProxyUrl } from "../../src/utils.js";
 
 describe("truncateResult", () => {
   it("returns short data unchanged", () => {
@@ -56,5 +56,57 @@ describe("capString", () => {
 
   it("truncates long strings with ellipsis", () => {
     assert.equal(capString("hello world", 5), "hello...");
+  });
+});
+
+describe("redactProxyUrl", () => {
+  it("redacts the password and keeps the username", () => {
+    assert.equal(
+      redactProxyUrl("http://user:s3cret@proxy.example.com:8000"),
+      "http://user:***@proxy.example.com:8000",
+    );
+  });
+
+  it("keeps a username that encodes configuration", () => {
+    assert.equal(
+      redactProxyUrl("http://groups-RESIDENTIAL,country-US:apify_proxy_abc@proxy.apify.com:8000"),
+      "http://groups-RESIDENTIAL,country-US:***@proxy.apify.com:8000",
+    );
+  });
+
+  it("leaves a URL without a password unchanged", () => {
+    assert.equal(redactProxyUrl("http://proxy.example.com:8000"), "http://proxy.example.com:8000");
+    assert.equal(redactProxyUrl("http://user@proxy.example.com:8000"), "http://user@proxy.example.com:8000");
+    assert.equal(redactProxyUrl("http://user:@proxy.example.com:8000"), "http://user:@proxy.example.com:8000");
+  });
+
+  it("does not append a trailing slash", () => {
+    assert.ok(!redactProxyUrl("http://user:pass@host:8000").endsWith("/"));
+  });
+
+  it("handles socks and pac schemes", () => {
+    assert.equal(redactProxyUrl("socks5://user:pass@host:1080"), "socks5://user:***@host:1080");
+    assert.equal(redactProxyUrl("socks4://host:1080"), "socks4://host:1080");
+    assert.equal(
+      redactProxyUrl("pac+http://example.com/proxy.pac"),
+      "pac+http://example.com/proxy.pac",
+    );
+  });
+
+  it("redacts percent-encoded credentials", () => {
+    assert.equal(
+      redactProxyUrl("http://us%40er:p%3Aass@host:8000"),
+      "http://us%40er:***@host:8000",
+    );
+  });
+
+  it("never echoes an unparseable value", () => {
+    assert.equal(redactProxyUrl("not a url"), "<unparseable url>");
+    assert.equal(redactProxyUrl(""), "<unparseable url>");
+  });
+
+  it("leaves no trace of the secret in its output", () => {
+    const out = redactProxyUrl("http://user:topsecret@host:8000");
+    assert.ok(!out.includes("topsecret"));
   });
 });

@@ -83,3 +83,33 @@ export function capString(s: string, maxLen: number): string {
   if (s.length <= maxLen) return s;
   return s.slice(0, maxLen) + "...";
 }
+
+/**
+ * Replace the password in a proxy URL with "***" for safe logging.
+ *
+ * Upstream proxy URLs carry credentials, and tool responses are persisted in
+ * the MCP client transcript. The username is preserved on purpose: for some
+ * providers it is configuration rather than a secret (Apify Proxy encodes
+ * proxy group, country and sticky-session id there), and it is what makes a
+ * confirmation message worth printing.
+ */
+export function redactProxyUrl(proxyUrl: string): string {
+  let url: URL;
+  try {
+    url = new URL(proxyUrl);
+  } catch {
+    return "<unparseable url>";
+  }
+  if (!url.password) return proxyUrl;
+
+  // Splice the original string rather than re-serializing the URL, so the
+  // message shows exactly what was passed in (URL.toString() would append a
+  // trailing "/" to an authority-only http URL).
+  const marker = `:${url.password}@`;
+  const idx = proxyUrl.indexOf(marker);
+  if (idx !== -1) {
+    return `${proxyUrl.slice(0, idx)}:***@${proxyUrl.slice(idx + marker.length)}`;
+  }
+  url.password = "***";
+  return url.toString();
+}
