@@ -13,7 +13,7 @@ import type * as mockttp from "mockttp";
 import type { CompletedRequest, CompletedResponse, ProxyConfig } from "mockttp";
 import { randomUUID } from "node:crypto";
 import { gunzipSync, inflateSync, brotliDecompressSync } from "node:zlib";
-import { serializeHeaders, capString } from "./utils.js";
+import { serializeHeaders, capString, redactProxyUrl } from "./utils.js";
 import { enableServerTlsCapture, type ServerTlsCapture } from "./tls-utils.js";
 import { spoofedRequest, shutdownSpoofContainer, stripHopByHopHeaders } from "./tls-spoof.js";
 import { applyFingerprintHeaderOverrides } from "./spoof-headers.js";
@@ -342,6 +342,20 @@ function rewriteReplayUrl(originalUrl: string, targetBaseUrl?: string): string {
   return new URL(`${original.pathname}${original.search}`, base).toString();
 }
 
+/**
+ * Copy an upstream config with its proxy URL redacted, for status output.
+ *
+ * proxy_status and the proxy://status resource are read far more often than a
+ * set-upstream call, and clients read the resource unprompted, so this is the
+ * larger writer of credentials into a transcript.
+ */
+function redactUpstreamConfig<T extends UpstreamProxyConfig | null>(
+  config: T,
+): T extends null ? null : UpstreamProxyConfig {
+  if (!config) return null as never;
+  return { ...config, proxyUrl: redactProxyUrl(config.proxyUrl) } as never;
+}
+
 // ── ProxyManager ──
 
 let nextRuleId = 1;
@@ -502,8 +516,12 @@ export class ProxyManager {
       port: this.port,
       url: this.server?.url ?? null,
       certFingerprint: this.cert?.fingerprint ?? null,
-      globalUpstream: this.globalUpstream,
-      hostUpstreams: Object.fromEntries(this.hostUpstreams),
+      // Redacted on the way out only. The stored configs must keep their real
+      // credentials: rebuildMockttpRules() reads proxyUrl to actually route.
+      globalUpstream: redactUpstreamConfig(this.globalUpstream),
+      hostUpstreams: Object.fromEntries(
+        [...this.hostUpstreams].map(([host, config]) => [host, redactUpstreamConfig(config)]),
+      ),
       ruleCount: this.rules.size,
       trafficCount: this.traffic.length,
       transparentProxy: this.getTransparentStatus(),
