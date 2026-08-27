@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { truncateResult, getLocalIP, serializeHeaders, capString, redactProxyUrl } from "../../src/utils.js";
+import { truncateResult, getLocalIP, serializeHeaders, capString, redactProxyUrl, expandProxyUrlEnv } from "../../src/utils.js";
 
 describe("truncateResult", () => {
   it("returns short data unchanged", () => {
@@ -108,5 +108,83 @@ describe("redactProxyUrl", () => {
   it("leaves no trace of the secret in its output", () => {
     const out = redactProxyUrl("http://user:topsecret@host:8000");
     assert.ok(!out.includes("topsecret"));
+  });
+});
+
+describe("expandProxyUrlEnv", () => {
+  const env = { PROXY_MCP_PASS: "s3cret", PROXY_MCP_USER: "alice", PROXY_MCP_EMPTY: "" };
+
+  it("expands a prefixed placeholder", () => {
+    assert.equal(
+      expandProxyUrlEnv("http://user:${PROXY_MCP_PASS}@host:8000", env),
+      "http://user:s3cret@host:8000",
+    );
+  });
+
+  it("expands several placeholders", () => {
+    assert.equal(
+      expandProxyUrlEnv("http://${PROXY_MCP_USER}:${PROXY_MCP_PASS}@host:8000", env),
+      "http://alice:s3cret@host:8000",
+    );
+  });
+
+  it("leaves a URL without placeholders unchanged", () => {
+    assert.equal(
+      expandProxyUrlEnv("http://user:pass@host:8000", env),
+      "http://user:pass@host:8000",
+    );
+  });
+
+  it("refuses to read a variable outside the namespace", () => {
+    assert.throws(
+      () => expandProxyUrlEnv("http://x:${AWS_SECRET_ACCESS_KEY}@evil.example:80", {
+        AWS_SECRET_ACCESS_KEY: "leak-me",
+      }),
+      /only variables prefixed with PROXY_MCP_/,
+    );
+  });
+
+  it("never leaks the value of a refused variable", () => {
+    try {
+      expandProxyUrlEnv("http://x:${SECRET}@host:80", { SECRET: "leak-me" });
+      assert.fail("should have thrown");
+    } catch (e) {
+      assert.ok(!String(e).includes("leak-me"));
+    }
+  });
+
+  it("throws on an unset variable rather than expanding to empty", () => {
+    assert.throws(
+      () => expandProxyUrlEnv("http://u:${PROXY_MCP_MISSING}@host:80", env),
+      /PROXY_MCP_MISSING is unset or empty/,
+    );
+  });
+
+  it("throws on an empty variable", () => {
+    assert.throws(
+      () => expandProxyUrlEnv("http://u:${PROXY_MCP_EMPTY}@host:80", env),
+      /PROXY_MCP_EMPTY is unset or empty/,
+    );
+  });
+
+  it("leaves bare $VAR alone", () => {
+    assert.equal(
+      expandProxyUrlEnv("http://user:pa$$word@host:8000", env),
+      "http://user:pa$$word@host:8000",
+    );
+    assert.equal(
+      expandProxyUrlEnv("http://user:$PROXY_MCP_PASS@host:8000", env),
+      "http://user:$PROXY_MCP_PASS@host:8000",
+    );
+  });
+
+  it("does not re-scan an expanded value", () => {
+    assert.equal(
+      expandProxyUrlEnv("http://u:${PROXY_MCP_NESTED}@host:80", {
+        PROXY_MCP_NESTED: "${PROXY_MCP_PASS}",
+        PROXY_MCP_PASS: "s3cret",
+      }),
+      "http://u:${PROXY_MCP_PASS}@host:80",
+    );
   });
 });

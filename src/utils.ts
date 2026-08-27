@@ -113,3 +113,40 @@ export function redactProxyUrl(proxyUrl: string): string {
   url.password = "***";
   return url.toString();
 }
+
+/**
+ * Prefix a variable name must carry to be readable via ${...} expansion.
+ *
+ * Expansion lets a caller keep a credential out of the tool call, but it also
+ * lets the caller read the server's environment. Namespacing keeps that
+ * deliberate: an agent cannot reach ${AWS_SECRET_ACCESS_KEY} and forward it to
+ * a host of its choosing as Proxy-Authorization.
+ */
+const ENV_PREFIX = "PROXY_MCP_";
+
+/**
+ * Expand ${PROXY_MCP_*} placeholders in an upstream proxy URL from the
+ * environment, so credentials need not appear in the tool call.
+ *
+ * Throws on an unprefixed name, or on a variable that is unset or empty. An
+ * empty expansion is never silently allowed: it would produce a broken upstream
+ * that is very hard to diagnose. Bare $VAR is left alone, so existing literal
+ * URLs containing "$" keep working.
+ */
+export function expandProxyUrlEnv(
+  proxyUrl: string,
+  env: NodeJS.ProcessEnv = process.env,
+): string {
+  return proxyUrl.replace(/\$\{([^}]*)\}/g, (_match, name: string) => {
+    if (!name.startsWith(ENV_PREFIX)) {
+      throw new Error(
+        `Refusing to expand \${${name}}: only variables prefixed with ${ENV_PREFIX} can be read.`,
+      );
+    }
+    const value = env[name];
+    if (!value) {
+      throw new Error(`Environment variable ${name} is unset or empty.`);
+    }
+    return value;
+  });
+}
