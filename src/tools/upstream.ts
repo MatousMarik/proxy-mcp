@@ -5,7 +5,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { proxyManager } from "../state.js";
-import { isParseableUrl, mergeUpstreamPassword, redactProxyUrl, upstreamPasswordSource } from "../utils.js";
+import { mergeUpstreamPassword, redactProxyUrl, upstreamPasswordSource } from "../utils.js";
 
 /**
  * A proxy_url the code cannot parse must not report success: redaction removed
@@ -34,7 +34,7 @@ export function registerUpstreamTools(server: McpServer): void {
     },
     async ({ proxy_url, no_proxy }) => {
       try {
-        if (!isParseableUrl(proxy_url)) return unparseable();
+        if (!URL.canParse(proxy_url)) return unparseable();
         const resolved = mergeUpstreamPassword(proxy_url);
         const passwordSource = upstreamPasswordSource(proxy_url, resolved);
         await proxyManager.setGlobalUpstream({ proxyUrl: resolved, noProxy: no_proxy });
@@ -84,7 +84,7 @@ export function registerUpstreamTools(server: McpServer): void {
     },
     async ({ hostname, proxy_url, no_proxy }) => {
       try {
-        if (!isParseableUrl(proxy_url)) return unparseable();
+        if (!URL.canParse(proxy_url)) return unparseable();
         const resolved = mergeUpstreamPassword(proxy_url);
         const passwordSource = upstreamPasswordSource(proxy_url, resolved);
         await proxyManager.setHostUpstream(hostname, { proxyUrl: resolved, noProxy: no_proxy });

@@ -218,18 +218,21 @@ describe("mergeUpstreamPassword", () => {
     assert.equal(auth.slice(auth.indexOf(":") + 1), secret);
   });
 
-  it("documents that a socks upstream truncates a password at ':'", () => {
+  it("refuses a socks upstream rather than truncate the password at ':'", () => {
     // socks-proxy-agent@7 does opts.auth.split(":") and takes [1]
     // (mockttp/node_modules/socks-proxy-agent/dist/index.js:78-81), so anything
-    // after the first ":" is dropped. This is a pre-existing toolchain limit,
-    // not something this merge introduces: a literal socks5://u:pa%3Ass@host
-    // truncates identically. Pinned so the restriction is visible, and so this
-    // fails if socks-proxy-agent ever starts honouring the full password.
-    const out = mergeUpstreamPassword("socks5://user@host:1080", {
-      PROXY_MCP_UPSTREAM_PASSWORD: "pa:ss",
-      PROXY_MCP_UPSTREAM_HOST: "host",
-    });
-    assert.equal(parse(out).auth!.split(":")[1], "pa");
+    // after the first ":" is silently dropped and half the password
+    // authenticates. Refusing is better than delivering a credential we know is
+    // wrong. A literal socks5://u:pa%3Ass@host still truncates — the toolchain
+    // limit is unchanged, this only stops us walking into it.
+    assert.throws(
+      () => mergeUpstreamPassword("socks5://user@host:1080", {
+        PROXY_MCP_UPSTREAM_PASSWORD: "pa:ss",
+        PROXY_MCP_UPSTREAM_HOST: "host",
+      }),
+      /truncates/,
+    );
+    assert.equal(parse("socks5://user:pa%3Ass@host:1080").auth!.split(":")[1], "pa");
 
     // ...while a socks password with no ":" is delivered whole.
     const ok = mergeUpstreamPassword("socks5://user@host:1080", {
@@ -237,6 +240,15 @@ describe("mergeUpstreamPassword", () => {
       PROXY_MCP_UPSTREAM_HOST: "host",
     });
     assert.equal(parse(ok).auth!.split(":")[1], "p@ss/word");
+
+    // http takes the whole password, so ":" is fine there.
+    assert.equal(
+      parse(mergeUpstreamPassword("http://user@host:8000", {
+        PROXY_MCP_UPSTREAM_PASSWORD: "pa:ss",
+        PROXY_MCP_UPSTREAM_HOST: "host",
+      })).auth,
+      "user:pa:ss",
+    );
   });
 
   it("leaves an explicit password alone", () => {

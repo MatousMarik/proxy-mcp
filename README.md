@@ -202,7 +202,7 @@ shell does not reach it:
 | variable | meaning |
 |---|---|
 | `PROXY_MCP_UPSTREAM_PASSWORD` | the password to fill in |
-| `PROXY_MCP_UPSTREAM_HOST` | the only hostname it may be sent to |
+| `PROXY_MCP_UPSTREAM_HOST` | the only hostname it may be sent to — a bare hostname, no scheme, port or path |
 
 ```bash
 claude mcp add proxy-mcp \
@@ -260,12 +260,13 @@ pinned host; a URL without a username is left alone.
 > empty password before the server sees it. If the pinned host authenticates on
 > the username alone, unset `PROXY_MCP_UPSTREAM_PASSWORD` for that server.
 
-> **`socks4://`/`socks5://` upstreams: avoid `:` in the password.**
-> socks-proxy-agent splits the credential on the first `:` and keeps only what
-> follows it, so `pa:ss` authenticates as `pa`. This is a toolchain limitation
-> rather than something the environment variable introduces — a literal
-> `socks5://user:pa%3Ass@host:1080` truncates the same way — but it fails
-> silently, so it is worth knowing. `http://`, `https://` and `pac+http://`
+> **`socks*://` upstreams: no `:` in the password.** socks-proxy-agent splits
+> the credential on the first `:` and keeps only what follows, so `pa:ss` would
+> authenticate as `pa`. Rather than deliver half a password silently, a socks
+> upstream is **refused** with an error when `PROXY_MCP_UPSTREAM_PASSWORD`
+> contains `:`. The truncation itself is a toolchain limitation, not something
+> this introduces — a literal `socks5://user:pa%3Ass@host:1080` truncates the
+> same way, and nothing can guard that. `http://`, `https://` and `pac+http://`
 > upstreams take the whole password.
 
 Responses redact credentials — the password in userinfo, plus query values,

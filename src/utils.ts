@@ -145,6 +145,15 @@ export function mergeUpstreamPassword(
   if (!url.username || url.password) return proxyUrl;
   if (url.hostname.toLowerCase() !== host.toLowerCase()) return proxyUrl;
 
+  // socks-proxy-agent splits the credential on the first ":" and keeps only
+  // what follows, so half the password would authenticate — silently. Refusing
+  // beats delivering a credential we know is wrong.
+  if (url.protocol.startsWith("socks") && password.includes(":")) {
+    throw new Error(
+      `${UPSTREAM_PASSWORD_ENV} contains ":", which a ${url.protocol} upstream truncates. Use a password without ":" or put the credential in proxy_url.`,
+    );
+  }
+
   // encodeURIComponent, not the raw value: the password setter escapes "@" and
   // "/" but leaves "%" alone, and mockttp reads the credential back through
   // url.parse().auth, which decodeURIComponent()s it. A raw "%" therefore makes
@@ -177,14 +186,4 @@ export function upstreamPasswordSource(
   }
   if (!url.username) return null;
   return url.password ? "url" : "none";
-}
-
-/** Whether a value parses as a URL at all, for rejecting a typo at the boundary. */
-export function isParseableUrl(value: string): boolean {
-  try {
-    new URL(value);
-    return true;
-  } catch {
-    return false;
-  }
 }

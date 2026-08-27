@@ -24,7 +24,7 @@ import { join } from "node:path";
 import { randomBytes } from "node:crypto";
 import { proxyManager } from "../state.js";
 import { interceptorManager } from "../interceptors/manager.js";
-import { isParseableUrl, mergeUpstreamPassword, upstreamPasswordSource } from "../utils.js";
+import { mergeUpstreamPassword, upstreamPasswordSource } from "../utils.js";
 
 function errorToString(e: unknown): string {
   if (e instanceof Error) return e.message;
@@ -218,7 +218,7 @@ export function registerMobileTools(server: McpServer): void {
       try {
         // Validate and resolve the upstream before starting anything, so a
         // typo'd URL cannot leave both listeners running behind an error.
-        if (upstream_proxy_url && !isParseableUrl(upstream_proxy_url)) {
+        if (upstream_proxy_url && !URL.canParse(upstream_proxy_url)) {
           throw new Error("upstream_proxy_url is not a parseable URL — check the scheme, e.g. socks5://host:1080");
         }
         const resolvedUpstream = upstream_proxy_url
