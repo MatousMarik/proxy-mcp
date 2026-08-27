@@ -261,8 +261,8 @@ export function registerMobileTools(server: McpServer): void {
 
         // 5. Upstream (optional).
         let upstreamSet = false;
-        if (upstream_proxy_url) {
-          await proxyManager.setGlobalUpstream({ proxyUrl: resolvedUpstream! });
+        if (resolvedUpstream) {
+          await proxyManager.setGlobalUpstream({ proxyUrl: resolvedUpstream });
           upstreamSet = true;
         }
 

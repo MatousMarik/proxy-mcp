@@ -349,11 +349,8 @@ function rewriteReplayUrl(originalUrl: string, targetBaseUrl?: string): string {
  * set-upstream call, and clients read the resource unprompted, so this is the
  * larger writer of credentials into a transcript.
  */
-function redactUpstreamConfig<T extends UpstreamProxyConfig | null>(
-  config: T,
-): T extends null ? null : UpstreamProxyConfig {
-  if (!config) return null as never;
-  return { ...config, proxyUrl: redactProxyUrl(config.proxyUrl) } as never;
+function redactUpstreamConfig(config: UpstreamProxyConfig): UpstreamProxyConfig {
+  return { ...config, proxyUrl: redactProxyUrl(config.proxyUrl) };
 }
 
 // ── ProxyManager ──
@@ -518,7 +515,7 @@ export class ProxyManager {
       certFingerprint: this.cert?.fingerprint ?? null,
       // Redacted on the way out only. The stored configs must keep their real
       // credentials: rebuildMockttpRules() reads proxyUrl to actually route.
-      globalUpstream: redactUpstreamConfig(this.globalUpstream),
+      globalUpstream: this.globalUpstream && redactUpstreamConfig(this.globalUpstream),
       hostUpstreams: Object.fromEntries(
         [...this.hostUpstreams].map(([host, config]) => [host, redactUpstreamConfig(config)]),
       ),
