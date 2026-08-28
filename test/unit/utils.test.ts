@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { parse } from "node:url";
-import { truncateResult, getLocalIP, serializeHeaders, capString, redactProxyUrl, mergeUpstreamPassword, upstreamPasswordSource } from "../../src/utils.js";
+import { truncateResult, getLocalIP, serializeHeaders, capString, redactProxyUrl, mergeUpstreamPassword, upstreamPasswordSource, spawnEnv } from "../../src/utils.js";
 
 describe("truncateResult", () => {
   it("returns short data unchanged", () => {
@@ -368,5 +368,48 @@ describe("upstreamPasswordSource", () => {
     // rather than warning about a correctly unauthenticated upstream.
     assert.equal(source("http://host:8000", env), null);
     assert.equal(source("not a url", env), null);
+  });
+});
+
+describe("spawnEnv", () => {
+  it("removes the upstream password", () => {
+    process.env.PROXY_MCP_UPSTREAM_PASSWORD = "TOPSECRETPW";
+    try {
+      const env = spawnEnv();
+      assert.ok(!("PROXY_MCP_UPSTREAM_PASSWORD" in env));
+      assert.ok(!JSON.stringify(env).includes("TOPSECRETPW"));
+    } finally {
+      delete process.env.PROXY_MCP_UPSTREAM_PASSWORD;
+    }
+  });
+
+  it("keeps the upstream host, which is configuration not a secret", () => {
+    process.env.PROXY_MCP_UPSTREAM_HOST = "pinned.example";
+    try {
+      assert.equal(spawnEnv().PROXY_MCP_UPSTREAM_HOST, "pinned.example");
+    } finally {
+      delete process.env.PROXY_MCP_UPSTREAM_HOST;
+    }
+  });
+
+  it("merges extras and still scrubs", () => {
+    process.env.PROXY_MCP_UPSTREAM_PASSWORD = "TOPSECRETPW";
+    try {
+      const env = spawnEnv({ NO_COLOR: "1" });
+      assert.equal(env.NO_COLOR, "1");
+      assert.ok(!("PROXY_MCP_UPSTREAM_PASSWORD" in env));
+    } finally {
+      delete process.env.PROXY_MCP_UPSTREAM_PASSWORD;
+    }
+  });
+
+  it("does not mutate process.env", () => {
+    process.env.PROXY_MCP_UPSTREAM_PASSWORD = "TOPSECRETPW";
+    try {
+      spawnEnv();
+      assert.equal(process.env.PROXY_MCP_UPSTREAM_PASSWORD, "TOPSECRETPW");
+    } finally {
+      delete process.env.PROXY_MCP_UPSTREAM_PASSWORD;
+    }
   });
 });

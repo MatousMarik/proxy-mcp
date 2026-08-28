@@ -9,7 +9,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { writeCertTempFile } from "./cert-utils.js";
 import type { Interceptor, InterceptorMetadata, ActivateOptions, ActivateResult, ActiveTarget } from "./types.js";
-import { UPSTREAM_PASSWORD_ENV } from "../utils.js";
+import { spawnEnv } from "../utils.js";
 
 const MAX_OUTPUT_BUFFER = 8192;
 
@@ -82,13 +82,10 @@ export class TerminalInterceptor implements Interceptor {
       // Certificate fingerprint (for reference)
       PROXY_MCP_CERT_FINGERPRINT: certFingerprint,
     };
-    // The upstream password is for this server to merge into a proxy URL, not
-    // for a caller-chosen command to read back out of its own environment.
-    delete proxyEnv[UPSTREAM_PASSWORD_ENV];
 
     const child = spawn(command, args ?? [], {
       cwd,
-      env: proxyEnv,
+      env: spawnEnv(proxyEnv),
       stdio: ["ignore", "pipe", "pipe"],
       detached: false,
     });

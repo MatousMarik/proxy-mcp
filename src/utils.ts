@@ -86,6 +86,22 @@ export function capString(s: string, maxLen: number): string {
 
 /** Upstream proxy password, and the one hostname it may be sent to. */
 export const UPSTREAM_PASSWORD_ENV = "PROXY_MCP_UPSTREAM_PASSWORD";
+
+/**
+ * Build the environment for a process this server spawns.
+ *
+ * The upstream password is for this server to merge into a proxy URL, not for a
+ * spawned command to read back out of its own environment. Both spawn sites go
+ * through here so neither can drift.
+ *
+ * PROXY_MCP_UPSTREAM_HOST is kept: it is configuration rather than a secret, and
+ * a spawned tool may legitimately need to know where its traffic goes.
+ */
+export function spawnEnv(extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { ...process.env, ...extra };
+  delete env[UPSTREAM_PASSWORD_ENV];
+  return env;
+}
 const UPSTREAM_HOST_ENV = "PROXY_MCP_UPSTREAM_HOST";
 
 /**

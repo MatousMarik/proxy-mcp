@@ -253,7 +253,8 @@ becoming an unbound credential.
 > can call `interceptor_spawn` should be treated as able to obtain the password.
 
 The response reports which credential was used — `passwordSource` is `env`,
-`url` or `none`. `none` means no password was applied to a URL that names a
+`url` or `none`. `proxy_mobile_setup` spells it `password_source`, matching the
+snake_case of the rest of that tool's response. `none` means no password was applied to a URL that names a
 user: either the credential is genuinely username-only, or the server does not
 have both variables set for this host. The field is omitted for a URL with no
 username, where the question does not arise.
