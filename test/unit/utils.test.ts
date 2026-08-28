@@ -80,6 +80,15 @@ describe("redactProxyUrl", () => {
     assert.equal(redactProxyUrl("http://user@proxy.example.com:8000"), "http://user@proxy.example.com:8000/");
   });
 
+  it("treats an empty password (user:@host) as no password", () => {
+    // The WHATWG parser erases the empty password before redaction sees it,
+    // so there is nothing to mask and no stray ":***" appears.
+    assert.equal(
+      redactProxyUrl("http://user:@proxy.example.com:8000"),
+      "http://user@proxy.example.com:8000/",
+    );
+  });
+
   it("drops a pac+http token carried in the query", () => {
     assert.equal(
       redactProxyUrl("pac+http://pac.example.com/proxy.pac?token=SECRET"),
