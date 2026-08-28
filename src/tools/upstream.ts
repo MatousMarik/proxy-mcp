@@ -29,7 +29,7 @@ export function registerUpstreamTools(server: McpServer): void {
     "proxy_set_upstream",
     "Set a global upstream proxy for all outgoing traffic. Supports socks4://, socks5://, http://, https://, and pac+http:// URLs.",
     {
-      proxy_url: z.string().describe("Upstream proxy URL (e.g., socks5://user:pass@host:port). If the URL has a username but no password, the password is taken from the PROXY_MCP_UPSTREAM_PASSWORD environment variable, so it need not appear in this call."),
+      proxy_url: z.string().describe("Upstream proxy URL (e.g., socks5://user:pass@host:port). If the URL has a username but no password, and the server has both PROXY_MCP_UPSTREAM_PASSWORD and PROXY_MCP_UPSTREAM_HOST set with the host matching this URL's hostname, the password is filled in from the environment so it need not appear in this call. Otherwise the URL is used as given; the response reports passwordSource: env | url | none."),
       no_proxy: z.array(z.string()).optional().describe("Hostnames to bypass the upstream proxy"),
     },
     async ({ proxy_url, no_proxy }) => {
@@ -79,7 +79,7 @@ export function registerUpstreamTools(server: McpServer): void {
     "Set a per-host upstream proxy override. Traffic to this hostname will use the specified proxy instead of the global one.",
     {
       hostname: z.string().describe("Hostname to override (e.g., api.example.com)"),
-      proxy_url: z.string().describe("Upstream proxy URL for this host. If it has a username but no password, the password is taken from PROXY_MCP_UPSTREAM_PASSWORD."),
+      proxy_url: z.string().describe("Upstream proxy URL for this host. If it has a username but no password, the password is filled in from PROXY_MCP_UPSTREAM_PASSWORD, but only when PROXY_MCP_UPSTREAM_HOST is also set and matches this URL's hostname. The response reports passwordSource: env | url | none."),
       no_proxy: z.array(z.string()).optional().describe("Hostnames to bypass this proxy"),
     },
     async ({ hostname, proxy_url, no_proxy }) => {

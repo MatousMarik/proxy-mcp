@@ -199,7 +199,7 @@ export function registerMobileTools(server: McpServer): void {
       explicit_port: z.number().optional().default(8080).describe("Port for the explicit HTTP proxy (default: 8080)."),
       transparent_port: z.number().optional().default(8443).describe("Port for the transparent HTTPS listener (default: 8443)."),
       block_quic: z.boolean().optional().default(true).describe("Drop UDP/443 on the AP iface so apps fall back to TCP/TLS (capturable). Default: true."),
-      upstream_proxy_url: z.string().optional().describe("Optional upstream proxy URL (socks5://user:pass@host:port or http://...). Sets the global upstream for BOTH listeners. If it has a username but no password, the password is taken from PROXY_MCP_UPSTREAM_PASSWORD."),
+      upstream_proxy_url: z.string().optional().describe("Optional upstream proxy URL (socks5://user:pass@host:port or http://...). Sets the global upstream for BOTH listeners. If it has a username but no password, the password is filled in from PROXY_MCP_UPSTREAM_PASSWORD, but only when PROXY_MCP_UPSTREAM_HOST is also set and matches this URL's hostname."),
       android_serial: z.string().optional().describe("ADB serial of an Android device to inject the CA on. If omitted, no cert injection is attempted."),
       inject_cert: z.boolean().optional().default(true).describe("Inject the CA into the Android device's system store. Ignored if android_serial is omitted."),
     },

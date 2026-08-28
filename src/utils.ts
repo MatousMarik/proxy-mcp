@@ -130,6 +130,10 @@ export function redactProxyUrl(proxyUrl: string): string {
  * A URL with no username, or one that already carries a password, is returned
  * untouched; so is any URL when either variable is unset.
  */
+function stripBrackets(host: string): string {
+  return host.replace(/^\[|\]$/g, "").toLowerCase();
+}
+
 export function mergeUpstreamPassword(
   proxyUrl: string,
   env: NodeJS.ProcessEnv = process.env,
@@ -145,7 +149,9 @@ export function mergeUpstreamPassword(
     return proxyUrl; // the tool boundary rejects it
   }
   if (!url.username || url.password) return proxyUrl;
-  if (url.hostname.toLowerCase() !== host.toLowerCase()) return proxyUrl;
+  // url.hostname keeps the brackets on an IPv6 literal ("[::1]"), so strip them
+  // from both sides: the variable is documented as a bare hostname.
+  if (stripBrackets(url.hostname) !== stripBrackets(host)) return proxyUrl;
 
   // socks-proxy-agent splits the credential on the first ":" and keeps only
   // what follows, so half the password would authenticate — silently. Refusing

@@ -272,6 +272,29 @@ describe("mergeUpstreamPassword", () => {
     );
   });
 
+  it("matches an IPv6 upstream, whose hostname carries brackets", () => {
+    // url.hostname returns "[::1]", so a bare "::1" in the variable — the form
+    // the README documents — would never match without normalizing.
+    for (const pinned of ["::1", "[::1]"]) {
+      const out = mergeUpstreamPassword("http://user@[::1]:8000", {
+        PROXY_MCP_UPSTREAM_PASSWORD: "s3cret",
+        PROXY_MCP_UPSTREAM_HOST: pinned,
+      });
+      assert.equal(new URL(out).password, "s3cret", `pinned as ${pinned}`);
+      assert.equal(new URL(out).hostname, "[::1]");
+    }
+  });
+
+  it("still refuses a different IPv6 host", () => {
+    assert.equal(
+      mergeUpstreamPassword("http://user@[::2]:8000", {
+        PROXY_MCP_UPSTREAM_PASSWORD: "s3cret",
+        PROXY_MCP_UPSTREAM_HOST: "::1",
+      }),
+      "http://user@[::2]:8000",
+    );
+  });
+
   it("leaves a URL with no username alone", () => {
     assert.equal(mergeUpstreamPassword("http://host:8000", env), "http://host:8000");
   });
