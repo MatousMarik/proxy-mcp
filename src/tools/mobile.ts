@@ -221,12 +221,12 @@ export function registerMobileTools(server: McpServer): void {
         if (upstream_proxy_url && !URL.canParse(upstream_proxy_url)) {
           throw new Error("upstream_proxy_url is not a parseable URL — check the scheme, e.g. socks5://host:1080");
         }
-        const resolvedUpstream = upstream_proxy_url
-          ? mergeUpstreamPassword(upstream_proxy_url)
-          : undefined;
-        const passwordSource = upstream_proxy_url
-          ? upstreamPasswordSource(upstream_proxy_url, resolvedUpstream!)
-          : null;
+        let resolvedUpstream: string | undefined;
+        let passwordSource: ReturnType<typeof upstreamPasswordSource> = null;
+        if (upstream_proxy_url) {
+          resolvedUpstream = mergeUpstreamPassword(upstream_proxy_url);
+          passwordSource = upstreamPasswordSource(upstream_proxy_url, resolvedUpstream);
+        }
 
         // 1. Resolve AP iface.
         let apIface = ap_iface;
@@ -319,7 +319,7 @@ export function registerMobileTools(server: McpServer): void {
               transparent_port: transparentPortUsed,
               block_quic,
               upstream_set: upstreamSet,
-              ...(passwordSource ? { passwordSource } : {}),
+              ...(passwordSource ? { password_source: passwordSource } : {}),
               cert_injected: certInjected,
               android_target_id: androidTargetId,
               sudo_script: scriptPath,

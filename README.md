@@ -196,8 +196,10 @@ writing an upstream password there on every call, set it in the server's
 environment and pass a URL with a username but no password.
 
 Two variables are required, and both have to be in the environment of the
-**server process**, which the MCP client spawns — exporting them in your own
-shell does not reach it:
+**server process**, which the MCP client spawns. Exporting them in the shell you
+launch the client from may reach it — CLI clients pass their own environment
+through — but that depends on the client and is lost the moment the server is
+started any other way. Put them in the client's server config:
 
 | variable | meaning |
 |---|---|
@@ -242,6 +244,13 @@ several. A URL naming any other host is left alone. If
 `PROXY_MCP_UPSTREAM_PASSWORD` is set and `PROXY_MCP_UPSTREAM_HOST` is not,
 nothing is merged at all: a half-configuration fails closed rather than
 becoming an unbound credential.
+
+> **This keeps the password out of tool arguments and responses, not out of
+> reach.** `interceptor_spawn` runs an arbitrary command as the server user, so
+> a caller can read the client config file the password is configured in — and
+> on Linux `/proc/<pid>/environ`. The variable removes the routine exposure of
+> writing a credential into every tool call; it is not a sandbox, and anyone who
+> can call `interceptor_spawn` should be treated as able to obtain the password.
 
 The response reports which credential was used — `passwordSource` is `env`,
 `url` or `none`. `none` means no password was applied to a URL that names a

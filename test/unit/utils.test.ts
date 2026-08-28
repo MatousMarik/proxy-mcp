@@ -295,6 +295,21 @@ describe("mergeUpstreamPassword", () => {
     }
   });
 
+  it("accepts a '%' in the username", () => {
+    // The check must be a regex on "%3A", not decodeURIComponent(): the WHATWG
+    // userinfo encode set leaves "%" alone, so "100%pass" survives verbatim and
+    // decoding it throws URIError. A literal ":" can never reach url.username,
+    // so the regex is total.
+    for (const user of ["100%pass", "50%off", "user%"]) {
+      const out = mergeUpstreamPassword(`http://${user}@host:8000`, {
+        PROXY_MCP_UPSTREAM_PASSWORD: "s3cret",
+        PROXY_MCP_UPSTREAM_HOST: "host",
+      });
+      assert.equal(new URL(out).password, "s3cret", user);
+      assert.equal(new URL(out).username, user);
+    }
+  });
+
   it("leaves an explicit password alone", () => {
     assert.equal(
       mergeUpstreamPassword("http://user:mine@host:8000", env),

@@ -160,16 +160,12 @@ export function mergeUpstreamPassword(
   // from both sides: the variable is documented as a bare hostname.
   if (stripBrackets(url.hostname) !== stripBrackets(host)) return proxyUrl;
 
-  // socks-proxy-agent splits the credential on the first ":" and keeps only
-  // what follows, so half the password would authenticate — silently. Refusing
-  // beats delivering a credential we know is wrong. The username is split by
-  // the same rule, so a ":" in it (necessarily "%3A" in the URL) swallows the
-  // separator and the password we just merged is discarded entirely.
-  // A ":" in the username is unrepresentable in every credential format in this
-  // stack: Basic auth splits the decoded pair at the first colon (RFC 7617) and
-  // socks-proxy-agent does the same, so "gro:ups" + "s3cret" is delivered as
-  // user "gro". The merged password would be silently discarded.
-  if (decodeURIComponent(url.username).includes(":")) {
+  // A ":" in the username is unrepresentable in every credential format here:
+  // Basic auth splits the decoded pair at the first colon (RFC 7617) and
+  // socks-proxy-agent does the same, so "gro:ups" + "s3cret" arrives as user
+  // "gro" and the merged password is silently discarded. A literal ":" cannot
+  // survive WHATWG parsing of userinfo, so it is always "%3A" here.
+  if (/%3a/i.test(url.username)) {
     throw new Error(
       `proxy_url's username contains ":", which every proxy credential format in this stack reads as the user/password separator — the merged password would be dropped. Put the credential in proxy_url instead.`,
     );
