@@ -94,9 +94,10 @@ const UPSTREAM_HOST_ENV = "PROXY_MCP_UPSTREAM_HOST";
  * The username is preserved on purpose: for some providers it is configuration
  * rather than a secret (Apify Proxy encodes proxy group, country and
  * sticky-session id there), and it is what makes a confirmation message worth
- * printing. Everything else that can carry a token is masked — query values,
- * path segments and the fragment — because a pac+http:// URL carries its token
- * in one of those and no agent in this stack needs any of them echoed back.
+ * printing. Everything else that can carry a token is removed — the query and
+ * fragment are dropped and path segments masked — because a pac+http:// URL
+ * carries its token in one of those and no agent in this stack needs any of
+ * them echoed back.
  */
 export function redactProxyUrl(proxyUrl: string): string {
   let url: URL;
@@ -106,9 +107,10 @@ export function redactProxyUrl(proxyUrl: string): string {
     return "<unparseable url>";
   }
   if (url.password) url.password = "***";
-  for (const key of [...url.searchParams.keys()]) {
-    url.searchParams.set(key, "***");
-  }
+  // Drop the query rather than masking values: "?TOKEN" with no "=" parses as a
+  // key with an empty value, so masking would return "?TOKEN=***" — the token
+  // echoed in full, and looking redacted, so nobody would spot it.
+  url.search = "";
   url.hash = "";
   url.pathname = url.pathname.replace(/[^/]+/g, "***");
   return url.toString();

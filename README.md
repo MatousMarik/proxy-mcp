@@ -269,13 +269,13 @@ pinned host; a URL without a username is left alone.
 > same way, and nothing can guard that. `http://`, `https://` and `pac+http://`
 > upstreams take the whole password.
 
-Responses redact credentials — the password in userinfo, plus query values,
-path segments and any fragment, since a `pac+http://` token may live in any of
-those:
+Responses redact credentials — the password in userinfo, with path segments
+masked and the query and fragment dropped, since a `pac+http://` token may live
+in any of those:
 
 ```
 Global upstream set to http://user:***@upstream.example:1080/
-Global upstream set to pac+http://pac.example.com/***?token=***
+Global upstream set to pac+http://pac.example.com/***
 ```
 
 `proxy_status` and the `proxy://status` resource are redacted the same way. A

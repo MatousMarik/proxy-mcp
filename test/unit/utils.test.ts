@@ -80,10 +80,24 @@ describe("redactProxyUrl", () => {
     assert.equal(redactProxyUrl("http://user@proxy.example.com:8000"), "http://user@proxy.example.com:8000/");
   });
 
-  it("redacts a pac+http token carried in the query", () => {
-    const out = redactProxyUrl("pac+http://pac.example.com/proxy.pac?token=SECRET");
-    assert.ok(!out.includes("SECRET"));
-    assert.equal(out, "pac+http://pac.example.com/***?token=***");
+  it("drops a pac+http token carried in the query", () => {
+    assert.equal(
+      redactProxyUrl("pac+http://pac.example.com/proxy.pac?token=SECRET"),
+      "pac+http://pac.example.com/***",
+    );
+  });
+
+  it("drops a bare query token, which masking values alone would echo", () => {
+    // "?SECRETTOKEN" has no "=", so it parses as a key with an empty value.
+    // Masking values would return "?SECRETTOKEN=***": the token in full,
+    // wearing the mask that is supposed to mean it is gone.
+    for (const url of [
+      "pac+http://pac.example.com/proxy.pac?SECRETTOKEN",
+      "pac+http://h/p.pac?a=1&SECRETTOKEN",
+      "http://u:pw@h:8000?SECRETTOKEN",
+    ]) {
+      assert.ok(!redactProxyUrl(url).includes("SECRETTOKEN"), url);
+    }
   });
 
   it("masks path segments and drops the fragment", () => {
