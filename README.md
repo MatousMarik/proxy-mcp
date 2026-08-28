@@ -269,6 +269,13 @@ pinned host; a URL without a username is left alone.
 > same way, and nothing can guard that. `http://`, `https://` and `pac+http://`
 > upstreams take the whole password.
 
+> **A `:` in the *username* is refused on every scheme.** Basic auth splits the
+> decoded pair at the first colon (RFC 7617), and socks-proxy-agent does the
+> same, so a username of `gro:ups` with password `s3cret` reaches the proxy as
+> user `gro`, password `ups:s3cret` — the merged password silently discarded.
+> No scheme can carry it, so the merge refuses rather than guess. Put the whole
+> credential in `proxy_url` instead.
+
 Responses redact credentials — the password in userinfo, with path segments
 masked and the query and fragment dropped, since a `pac+http://` token may live
 in any of those:

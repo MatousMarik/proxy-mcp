@@ -132,6 +132,13 @@ describe("redactProxyUrl", () => {
     );
   });
 
+  it("reduces an opaque-path URL to its scheme", () => {
+    // "pac+http:host/TOKEN.pac" has no authority, so assigning pathname is a
+    // silent no-op and the token would otherwise survive verbatim.
+    assert.equal(redactProxyUrl("pac+http:host/TOKEN.pac"), "pac+http:***");
+    assert.ok(!redactProxyUrl("pac+http:host/TOKEN.pac").includes("TOKEN"));
+  });
+
   it("never echoes an unparseable value", () => {
     assert.equal(redactProxyUrl("not a url"), "<unparseable url>");
     assert.equal(redactProxyUrl(""), "<unparseable url>");
@@ -263,6 +270,29 @@ describe("mergeUpstreamPassword", () => {
       })).auth,
       "user:pa:ss",
     );
+  });
+
+  it("refuses a ':' in the username on every scheme", () => {
+    // Basic auth splits the decoded pair at the first colon (RFC 7617) and
+    // socks-proxy-agent does the same, so "gro:ups" + "s3cret" arrives as user
+    // "gro" / password "ups:s3cret" — the merged password is discarded while
+    // the tool would still report passwordSource: "env". http is NOT exempt:
+    // checking url.parse().auth alone makes it look harmless, which is one
+    // layer short of what the proxy actually reads.
+    for (const url of [
+      "socks5://gro%3Aups@host:1080",
+      "http://gro%3Aups@host:8000",
+      "https://gro%3Aups@host:8443",
+    ]) {
+      assert.throws(
+        () => mergeUpstreamPassword(url, {
+          PROXY_MCP_UPSTREAM_PASSWORD: "s3cret",
+          PROXY_MCP_UPSTREAM_HOST: "host",
+        }),
+        /separator/,
+        url,
+      );
+    }
   });
 
   it("leaves an explicit password alone", () => {
