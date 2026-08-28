@@ -85,7 +85,7 @@ export function capString(s: string, maxLen: number): string {
 }
 
 /** Upstream proxy password, and the one hostname it may be sent to. */
-const UPSTREAM_PASSWORD_ENV = "PROXY_MCP_UPSTREAM_PASSWORD";
+export const UPSTREAM_PASSWORD_ENV = "PROXY_MCP_UPSTREAM_PASSWORD";
 const UPSTREAM_HOST_ENV = "PROXY_MCP_UPSTREAM_HOST";
 
 /**

@@ -30,6 +30,7 @@ import { join } from "node:path";
 import type {
   Interceptor, InterceptorMetadata, ActivateOptions, ActivateResult, ActiveTarget,
 } from "./types.js";
+import { UPSTREAM_PASSWORD_ENV } from "../utils.js";
 
 type CamoufoxOs = "windows" | "macos" | "linux";
 
@@ -189,14 +190,18 @@ export class CamoufoxInterceptor implements Interceptor {
     const scriptPath = join(launcherDir, "launch.py");
     await writeFile(scriptPath, buildLauncherScript(params, wsEndpointFile), "utf-8");
 
+    const childEnv: NodeJS.ProcessEnv = {
+      ...process.env,
+      NO_COLOR: "1",
+      PYTHONIOENCODING: "utf-8",
+    };
+    // Not the launcher's business, and it would land in a browser subprocess.
+    delete childEnv[UPSTREAM_PASSWORD_ENV];
+
     const proc = spawn(pythonExe, [scriptPath], {
       stdio: ["ignore", "pipe", "pipe"],
       cwd: launcherDir,
-      env: {
-        ...process.env,
-        NO_COLOR: "1",
-        PYTHONIOENCODING: "utf-8",
-      },
+      env: childEnv,
     });
 
     let handshake: WsHandshake;
